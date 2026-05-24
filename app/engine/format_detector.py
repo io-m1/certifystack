@@ -122,7 +122,7 @@ def detect_format(file_path: str) -> FormatDetectionResult:
     if header.startswith(b"II*\x00") or header.startswith(b"MM\x00*"):
         return FormatDetectionResult(DetectedFormat.UNSUPPORTED, "image/tiff", ext, 1.0, "TIFF image is not supported.")
         
-    if b"ftypheic" in header or b"ftypheix" in header or ext in (".heic", ".heif"):
-        return FormatDetectionResult(DetectedFormat.UNSUPPORTED, "image/heic", ext, 0.8, "HEIC format is not supported.")
+    if b"ftypheic" in header or b"ftypheix" in header:
+        return FormatDetectionResult(DetectedFormat.UNSUPPORTED, "image/heic", ext, 1.0, "HEIC format is not supported.")
         
     return FormatDetectionResult(DetectedFormat.UNSUPPORTED, "application/octet-stream", ext, 0.5, "Unsupported format.")
