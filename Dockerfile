@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     shared-mime-info \
     potrace \
+    inkscape \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
