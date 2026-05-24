@@ -15,8 +15,7 @@ def _get_org_settings(app_context):
 def generate_certificate(job_id: int, certificate_id: str, draft_id: int = None, **kwargs):
     from app import create_app
     from app.models import db, User, CertificateType, Certificate, JobQueue, CertificateStatus
-    from app.engine.pdf_processor import generate_personalized_pdf
-    from app.domain.certificates.service import resolve_certificate_asset, ensure_svg_template
+    from app.domain.certificates.service import ensure_svg_template
     from datetime import datetime
 
     app = create_app()
@@ -47,31 +46,41 @@ def generate_certificate(job_id: int, certificate_id: str, draft_id: int = None,
             org = _get_org_settings(None)
 
             issue_date = (user.sent_at or datetime.utcnow()).strftime('%d %B %Y')
-            base_url = org.verify_base_url or ''
-            verify_url = f'{base_url}/verify/{cert.id}' if base_url else ''
 
-            if cert_type.master_svg_path:
-                template_source = ensure_svg_template(cert_type) or resolve_certificate_asset(cert_type)
-            else:
-                template_source = resolve_certificate_asset(cert_type)
+            svg_path = ensure_svg_template(cert_type)
+            if not svg_path:
+                raise RuntimeError("SVG template path could not be resolved or created")
 
-            pdf_bytes = generate_personalized_pdf(
-                template_source, 
-                overlay_coords=cert_type.overlay_coords, 
-                full_name=user.full_name, 
-                certificate_id=cert.id,
-                issuance_date=issue_date, 
-                include_qr=user.include_qr, 
-                cert_name=cert_type.name, 
-                master_file_type=cert_type.master_file_type or 'pdf', 
-                verify_url=verify_url
+            field_data = {
+                "name": user.full_name,
+                "cert_id": cert.id,
+                "date": issue_date,
+            }
+
+            import os
+            os.makedirs("uploads", exist_ok=True)
+            personalized_svg_path = f"uploads/{cert.id}_personalized.svg"
+
+            from app.engine.svg_personalizer import personalize
+            from app.engine.svg2pdf import svg_to_pdf_bytes
+
+            personalize(
+                template_path=svg_path,
+                field_data=field_data,
+                output_path=personalized_svg_path,
+                options={"auto_shrink": True}
             )
+
+            try:
+                pdf_bytes = svg_to_pdf_bytes(personalized_svg_path)
+            finally:
+                if os.path.exists(personalized_svg_path):
+                    os.remove(personalized_svg_path)
 
             import hashlib
             pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
             cert.transition_to_generated(pdf_bytes, pdf_hash)
             
-            import os
             os.makedirs('archive', exist_ok=True)
             archive_path = f"archive/{cert.id}.pdf"
             with open(archive_path, 'wb') as f:
