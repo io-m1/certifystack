@@ -36,8 +36,14 @@ def has_selectable_text(pdf_path: str) -> bool:
         
         # Check elements recursively or iteratively for text
         for element in pages[0]:
-            if isinstance(element, LTTextContainer) and element.get_text().strip():
-                return True
+            cls_name = element.__class__.__name__
+            if ("LTTextContainer" in cls_name or "LTTextBox" in cls_name or hasattr(element, "get_text")):
+                try:
+                    txt = getattr(element, "get_text")()
+                    if txt and txt.strip():
+                        return True
+                except Exception:
+                    pass
         return False
     except Exception as e:
         if "encrypted" in str(e).lower() or "password" in str(e).lower():
