@@ -1,13 +1,13 @@
 [build]
 builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt"
+
+[build.nix]
+packages = ["cairo", "pango", "gdk-pixbuf"]
 
 [deploy]
 numReplicas = 1
-startCommand = "gunicorn wsgi:app --bind 0.0.0.0:8080 --workers 1 --timeout 120"
+startCommand = "sh start.sh"
 
 [service]
 port = 8080
-
-[[mounts]]
-mountPath = "/app/uploads"
-repository = "uploads"
