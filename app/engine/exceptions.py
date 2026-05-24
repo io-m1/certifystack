@@ -16,3 +16,8 @@ class ConversionError(CertificateEngineError):
 
 class FontError(CertificateEngineError):
     """Font loading, matching, or fallback issue."""
+
+
+class FormatDetectionError(CertificateEngineError):
+    """Unable to detect or validate the uploaded file format."""
+
