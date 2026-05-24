@@ -2,7 +2,6 @@ from flask import Blueprint, render_template, request, jsonify, current_app
 from flask_login import login_required, current_user
 from app.models import db, User, CertificateType, AuditLog, CertArchive, EmailDraft, OrgSettings, Campaign
 from app.engine.cert_id import assign_certificate_id, verify_format
-from app.engine.ocr_analyzer import analyze_template
 from datetime import datetime
 import uuid
 import os
@@ -211,21 +210,43 @@ def reanalyze_template(ct_id):
 @login_required
 def preview_certificate(ct_id):
     from flask import send_file
-    from app.engine.pdf_processor import generate_personalized_pdf
-    from app.domain.certificates.service import resolve_certificate_asset, ensure_svg_template
+    from app.domain.certificates.service import ensure_svg_template
     ct = CertificateType.query.get_or_404(ct_id)
     data = request.json or {}
     full_name = data.get('full_name', 'Jane Smith')
     cert_id = data.get('cert_id', 'MLJ-GEN-2026-000001')
     issue_date = data.get('issue_date', datetime.utcnow().strftime('%d %B %Y'))
-    include_qr = data.get('include_qr', True)
     try:
-        if ct.master_svg_path:
-            template_source = ensure_svg_template(ct) or resolve_certificate_asset(ct)
-        else:
-            template_source = resolve_certificate_asset(ct)
-        pdf_bytes = generate_personalized_pdf(template_source, overlay_coords=ct.overlay_coords, full_name=full_name,
-                                              certificate_id=cert_id, issuance_date=issue_date, include_qr=include_qr, cert_name=ct.name, master_file_type=ct.master_file_type or 'pdf')
+        svg_path = ensure_svg_template(ct)
+        if not svg_path:
+            raise RuntimeError("SVG template path could not be resolved or created")
+
+        field_data = {
+            "name": full_name,
+            "cert_id": cert_id,
+            "date": issue_date,
+        }
+
+        import os
+        os.makedirs("uploads", exist_ok=True)
+        temp_svg = f"uploads/preview_{ct_id}_{uuid.uuid4().hex[:8]}.svg"
+
+        from app.engine.svg_personalizer import personalize
+        from app.engine.svg2pdf import svg_to_pdf_bytes
+
+        personalize(
+            template_path=svg_path,
+            field_data=field_data,
+            output_path=temp_svg,
+            options={"auto_shrink": True}
+        )
+
+        try:
+            pdf_bytes = svg_to_pdf_bytes(temp_svg)
+        finally:
+            if os.path.exists(temp_svg):
+                os.remove(temp_svg)
+
     except RuntimeError as e:
         return (jsonify({'error': str(e)}), 404)
     except Exception as e:
@@ -355,19 +376,15 @@ def approve_users():
     if not cert_type:
         return jsonify({'error': 'Certificate type not found'}), 404
 
-    from app.engine.pdf_processor import generate_personalized_pdf
-    from app.domain.certificates.service import resolve_certificate_asset, ensure_svg_template
+    from app.domain.certificates.service import ensure_svg_template
     from app.engine.cert_id import assign_certificate_id
     from app.models import Certificate, CertificateStatus, OrgSettings
 
     org = OrgSettings.query.first() or OrgSettings()
-    base_url = (org.verify_base_url or '').rstrip('/')
 
-    # Resolve the template source once for all users
-    if cert_type.master_svg_path:
-        template_source = ensure_svg_template(cert_type) or resolve_certificate_asset(cert_type)
-    else:
-        template_source = resolve_certificate_asset(cert_type)
+    svg_template_path = ensure_svg_template(cert_type)
+    if not svg_template_path:
+        return jsonify({'error': 'SVG template path could not be resolved or created'}), 404
 
     generated = 0
     failed = 0
@@ -386,20 +403,31 @@ def approve_users():
             full_name = full_name.strip()
 
             issue_date = datetime.utcnow().strftime('%d %B %Y')
-            verify_url = f"{base_url}/verify/{user.certificate_id}" if base_url else ''
 
             # 2. Generate the PDF
-            pdf_bytes = generate_personalized_pdf(
-                template_source,
-                overlay_coords=cert_type.overlay_coords,
-                full_name=full_name,
-                certificate_id=user.certificate_id,
-                issuance_date=issue_date,
-                include_qr=user.include_qr,
-                cert_name=cert_type.name,
-                master_file_type=cert_type.master_file_type or 'pdf',
-                verify_url=verify_url
+            field_data = {
+                "name": full_name,
+                "cert_id": user.certificate_id,
+                "date": issue_date,
+            }
+
+            temp_svg = f"uploads/{user.certificate_id}_temp.svg"
+
+            from app.engine.svg_personalizer import personalize
+            from app.engine.svg2pdf import svg_to_pdf_bytes
+
+            personalize(
+                template_path=svg_template_path,
+                field_data=field_data,
+                output_path=temp_svg,
+                options={"auto_shrink": True}
             )
+
+            try:
+                pdf_bytes = svg_to_pdf_bytes(temp_svg)
+            finally:
+                if os.path.exists(temp_svg):
+                    os.remove(temp_svg)
 
             if not pdf_bytes or len(pdf_bytes) == 0:
                 raise ValueError("Generated PDF bytes are empty or invalid")
