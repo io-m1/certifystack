@@ -3,7 +3,7 @@ builder = "nixpacks"
 buildCommand = "pip install -r requirements.txt"
 
 [build.nix]
-packages = ["cairo", "pango", "gdk-pixbuf"]
+packages = ["cairo", "pango", "gdk-pixbuf", "libffi"]
 
 [deploy]
 numReplicas = 1
