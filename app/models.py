@@ -93,6 +93,9 @@ class CertificateType(db.Model):
     template_format = db.Column(db.String(10), default='svg')  # 'svg' or 'legacy_pdf'
     template_svg_path = db.Column(db.String(500))  # Path to master SVG template
     detected_fields = db.Column(db.JSON)  # Cache of detected field definitions
+    original_format = db.Column(db.String(20), nullable=True)
+    conversion_path = db.Column(db.String(50), nullable=True)
+    quality_level = db.Column(db.String(20), nullable=True)
     master_file_type = db.Column(db.String(10), default='pdf')
     overlay_coords = db.Column(db.JSON, nullable=False)
     ocr_regions = db.Column(db.JSON, nullable=True)
