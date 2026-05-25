@@ -96,6 +96,11 @@ class CertificateType(db.Model):
     original_format = db.Column(db.String(20), nullable=True)
     conversion_path = db.Column(db.String(50), nullable=True)
     quality_level = db.Column(db.String(20), nullable=True)
+    # Wave 3: Template Intelligence
+    field_mapping = db.Column(db.JSON, nullable=True)        # Confirmed field_id → field_type mapping
+    font_matches = db.Column(db.JSON, nullable=True)          # Font matching results per field
+    qr_placement = db.Column(db.JSON, nullable=True)          # QR code placement coordinates
+    mapping_status = db.Column(db.String(20), default='pending')  # 'pending'|'in_review'|'confirmed'
     master_file_type = db.Column(db.String(10), default='pdf')
     overlay_coords = db.Column(db.JSON, nullable=False)
     ocr_regions = db.Column(db.JSON, nullable=True)
