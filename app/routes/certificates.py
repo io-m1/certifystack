@@ -15,6 +15,17 @@ bp = Blueprint('certificates', __name__)
 from app.routes.template_upload import bp as template_upload_bp
 bp.register_blueprint(template_upload_bp)
 
+from app.routes.template_intelligence import bp as template_intelligence_bp
+bp.register_blueprint(template_intelligence_bp)
+
+
+@bp.route('/admin/templates/<int:cert_type_id>/map')
+@login_required
+def map_template(cert_type_id: int):
+    """Serve the WYSIWYG template mapping page."""
+    cert_type = CertificateType.query.get_or_404(cert_type_id)
+    return render_template('admin/template_mapper.html', cert_type=cert_type)
+
 
 
 @bp.route('/admin')
