@@ -9,7 +9,7 @@ def send_certificate_job(log_id: int, user_id: int, cert_type_id: int,
                           draft_id: int = None):
     from app import create_app
     from app.models import db, User, CertificateType, EmailLog, CertArchive, OrgSettings, EmailDraft
-    from app.engine.pdf_processor import generate_personalized_pdf
+    from app.engine.renderer import render_certificate_pdf
     from app.services.email.sender import dispatch
     from app.services.email.templates import render, build_context, DEFAULT_CERT_SUBJECT, DEFAULT_CERT_BODY
 
@@ -38,19 +38,9 @@ def send_certificate_job(log_id: int, user_id: int, cert_type_id: int,
 
             if archive and archive.pdf_binary:
                 pdf_bytes = archive.pdf_binary
-                logger.info(f"Using cached PDF for {user.certificate_id}")
+                logger.info(f"Using archived PDF for {user.certificate_id}")
             else:
-                pdf_bytes = generate_personalized_pdf(
-                    master_pdf_path=cert_type.master_pdf_path,
-                    overlay_coords=cert_type.overlay_coords,
-                    full_name=user.full_name,
-                    certificate_id=user.certificate_id,
-                    issuance_date=issue_date,
-                    include_qr=user.include_qr,
-                    cert_name=cert_type.name,
-                    master_file_type=cert_type.master_file_type or 'pdf',
-                    verify_url=verify_url,
-                )
+                pdf_bytes = render_certificate_pdf(user, cert_type, org)
                 if archive:
                     archive.pdf_binary = pdf_bytes
                 else:

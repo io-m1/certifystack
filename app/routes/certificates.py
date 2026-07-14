@@ -56,6 +56,7 @@ def list_cert_types():
         'id': ct.id, 'name': ct.name, 'course_code': ct.course_code,
         'period': ct.period, 'registration_token': ct.registration_token,
         'master_file_type': ct.master_file_type,
+        'render_mode': ct.render_mode or 'mlj',
         'user_count': len(ct.users),
         'seq_counter': ct.seq_counter,
     } for ct in types])
@@ -64,58 +65,89 @@ def list_cert_types():
 @bp.route('/api/cert-types', methods=['POST'])
 @login_required
 def create_cert_type():
+    """Create a certificate gateway. Uploading a master template is now
+    optional: with a file the legacy overlay engine is used; without one the
+    gateway renders the MedLocum designed certificate (ported from the
+    medlocumjobs e-learning pipeline) — no coordinates or OCR needed."""
     file = request.files.get('master_file')
-    if not file:
-        return jsonify({'error': 'Master file required'}), 400
     name = request.form.get('name', '').strip()
     period = request.form.get('period', '').strip()
     course_code = request.form.get('course_code', 'GEN').strip().upper()
     if not name or not period:
         return jsonify({'error': 'Name and period required'}), 400
-    ext = file.filename.rsplit('.', 1)[-1].lower()
-    if ext not in ('pdf', 'png'):
-        return jsonify({'error': 'Only PDF or PNG allowed'}), 400
-
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    filename = f"{uuid.uuid4().hex}.{ext}"
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(filepath)
-
-    overlay_coords = {
-        "name_x": 0, "name_y": 320, "name_w": 500, "name_h": 50,
-        "name_font_size": 30, "name_align": "center",
-        "cert_id_x": 60, "cert_id_y": 55, "cert_id_font_size": 9,
-        "date_x": 60, "date_y": 42, "date_font_size": 9,
-        "qr_x": -1, "qr_y": 22, "qr_size": 70
-    }
-    try:
-        custom = json.loads(request.form.get('overlay_coords') or 'null')
-        if custom:
-            overlay_coords.update(custom)
-    except Exception:
-        pass
-
-    try:
-        ocr_result = analyze_template(filepath, ext)
-    except Exception as ocr_err:
-        ocr_result = {'regions': [], 'message': f'OCR skipped: {ocr_err}'}
 
     token = str(uuid.uuid4())[:8]
-    ct = CertificateType(
-        name=name, course_code=course_code, period=period,
-        master_pdf_path=filepath, master_file_type=ext,
-        overlay_coords=overlay_coords,
-        ocr_regions=ocr_result.get('regions'),
-        registration_token=token,
-        email_message=request.form.get('email_message', '').strip() or None,
-        email_subject=request.form.get('email_subject', '').strip() or None,
-        seq_counter=0,
-    )
+    ocr_result = {'regions': None, 'message': None}
+
+    if file:
+        ext = file.filename.rsplit('.', 1)[-1].lower()
+        if ext not in ('pdf', 'png'):
+            return jsonify({'error': 'Only PDF or PNG allowed'}), 400
+
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}.{ext}"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(filepath)
+
+        overlay_coords = {
+            "name_x": 0, "name_y": 320, "name_w": 500, "name_h": 50,
+            "name_font_size": 30, "name_align": "center",
+            "cert_id_x": 60, "cert_id_y": 55, "cert_id_font_size": 9,
+            "date_x": 60, "date_y": 42, "date_font_size": 9,
+            "qr_x": -1, "qr_y": 22, "qr_size": 70
+        }
+        try:
+            custom = json.loads(request.form.get('overlay_coords') or 'null')
+            if custom:
+                overlay_coords.update(custom)
+        except Exception:
+            pass
+
+        try:
+            ocr_result = analyze_template(filepath, ext)
+        except Exception as ocr_err:
+            ocr_result = {'regions': [], 'message': f'OCR skipped: {ocr_err}'}
+
+        ct = CertificateType(
+            name=name, course_code=course_code, period=period,
+            render_mode='overlay',
+            master_pdf_path=filepath, master_file_type=ext,
+            overlay_coords=overlay_coords,
+            ocr_regions=ocr_result.get('regions'),
+            registration_token=token,
+            email_message=request.form.get('email_message', '').strip() or None,
+            email_subject=request.form.get('email_subject', '').strip() or None,
+            seq_counter=0,
+        )
+    else:
+        def _float(value, default=0.0):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        ct = CertificateType(
+            name=name, course_code=course_code, period=period,
+            render_mode='mlj',
+            master_pdf_path='', master_file_type='',
+            overlay_coords={},
+            registration_token=token,
+            organisation=request.form.get('organisation', '').strip(),
+            website=request.form.get('website', '').strip(),
+            signatory_name=request.form.get('signatory_name', '').strip(),
+            signatory_title=request.form.get('signatory_title', '').strip(),
+            duration_hours=_float(request.form.get('duration_hours')),
+            email_message=request.form.get('email_message', '').strip() or None,
+            email_subject=request.form.get('email_subject', '').strip() or None,
+            seq_counter=0,
+        )
+
     db.session.add(ct)
     db.session.commit()
 
     return jsonify({
         'id': ct.id, 'name': ct.name, 'registration_token': token,
+        'render_mode': ct.render_mode,
         'register_url': f"/register/{token}",
         'ocr_message': ocr_result.get('message'),
         'ocr_regions': ocr_result.get('regions'),
@@ -129,8 +161,14 @@ def get_cert_type(ct_id):
     return jsonify({
         'id': ct.id, 'name': ct.name, 'course_code': ct.course_code,
         'period': ct.period, 'master_file_type': ct.master_file_type,
+        'render_mode': ct.render_mode or 'mlj',
         'overlay_coords': ct.overlay_coords,
         'ocr_regions': ct.ocr_regions,
+        'organisation': ct.organisation,
+        'website': ct.website,
+        'signatory_name': ct.signatory_name,
+        'signatory_title': ct.signatory_title,
+        'duration_hours': ct.duration_hours,
         'email_subject': ct.email_subject,
         'email_message': ct.email_message,
         'registration_token': ct.registration_token,
@@ -143,7 +181,9 @@ def update_cert_type(ct_id):
     ct = CertificateType.query.get_or_404(ct_id)
     data = request.json or {}
     for field in ('name', 'period', 'course_code', 'overlay_coords',
-                  'email_message', 'email_subject', 'ocr_regions'):
+                  'email_message', 'email_subject', 'ocr_regions',
+                  'organisation', 'website', 'signatory_name',
+                  'signatory_title', 'duration_hours'):
         if field in data:
             setattr(ct, field, data[field])
     db.session.commit()
@@ -172,28 +212,28 @@ def reanalyze_template(ct_id):
 @login_required
 def preview_certificate(ct_id):
     from flask import send_file
-    from app.engine.pdf_processor import generate_personalized_pdf
     ct = CertificateType.query.get_or_404(ct_id)
     data = request.json or {}
     full_name = data.get('full_name', 'Jane Smith')
     cert_id = data.get('cert_id', 'MLJ-GEN-2026-000001')
-    issue_date = data.get('issue_date', datetime.utcnow().strftime('%d %B %Y'))
     include_qr = data.get('include_qr', True)
+    org = OrgSettings.query.first() or OrgSettings()
 
-    if not os.path.exists(ct.master_pdf_path):
+    mode = ct.render_mode or ('overlay' if ct.master_pdf_path else 'mlj')
+    if mode == 'overlay' and not os.path.exists(ct.master_pdf_path or ''):
         return jsonify({'error': 'Master certificate file not found on server. Please re-upload the template.'}), 404
 
+    preview_user = type('PreviewUser', (), {
+        'full_name': full_name,
+        'certificate_id': cert_id,
+        'include_qr': include_qr,
+        'sent_at': None,
+        'approved_at': None,
+    })()
+
     try:
-        pdf_bytes = generate_personalized_pdf(
-            master_pdf_path=ct.master_pdf_path,
-            overlay_coords=ct.overlay_coords,
-            full_name=full_name,
-            certificate_id=cert_id,
-            issuance_date=issue_date,
-            include_qr=include_qr,
-            cert_name=ct.name,
-            master_file_type=ct.master_file_type or 'pdf',
-        )
+        from app.engine.renderer import render_certificate_pdf
+        pdf_bytes = render_certificate_pdf(preview_user, ct, org)
     except FileNotFoundError:
         return jsonify({'error': 'Master certificate file missing.'}), 404
     except Exception as e:
@@ -223,6 +263,7 @@ def get_users(cert_type_id):
         'include_qr': u.include_qr,
         'score': u.score,
         'source': u.source,
+        'generated': u.generated_at is not None,
         'created_at': u.created_at.strftime('%d/%m/%Y %H:%M') if u.created_at else '',
     } for u in users]})
 
@@ -338,15 +379,33 @@ def toggle_qr():
 @bp.route('/api/approve', methods=['POST'])
 @login_required
 def approve_users():
+    """Approve (single or batch) after manual payment verification.
+    Approval immediately generates each registrant's certificate in the
+    background and archives the PDF — dispatch remains a separate,
+    admin-triggered step."""
+    from app.services.email.queue import run_in_background
+    from app.services.certgen import generate_certificates_job
+
     user_ids = request.json['user_ids']
-    User.query.filter(User.id.in_(user_ids)).update(
+    eligible = [u.id for u in User.query.filter(
+        User.id.in_(user_ids),
+        User.status.in_(['registered', 'rejected'])).all()]
+
+    User.query.filter(User.id.in_(eligible)).update(
         {'status': 'approved', 'approved_at': datetime.utcnow()},
         synchronize_session=False)
-    for uid in user_ids:
+    for uid in eligible:
         db.session.add(AuditLog(user_id=uid, action='approved',
                                 performed_by=current_user.email))
     db.session.commit()
-    return jsonify({'message': f'{len(user_ids)} approved'})
+
+    if eligible:
+        run_in_background(generate_certificates_job, user_ids=eligible)
+
+    return jsonify({
+        'message': f'{len(eligible)} approved — certificates are being generated',
+        'approved': len(eligible),
+    })
 
 
 @bp.route('/api/reject', methods=['POST'])
@@ -381,27 +440,26 @@ def send_certificates():
             'cert_type_id': cert_type_id,
         })
 
+    from app.services.email.queue import enqueue_batch
+
     users = User.query.filter(
         User.id.in_(user_ids), User.status == 'approved').all()
-    queued = 0
+    queued_ids = []
     for user in users:
         user.status = 'sending'
         user.sent_at = datetime.utcnow()
-        current_app.task_queue.enqueue(
-            'app.worker.generate_and_send_certificate',
-            user_id=user.id,
-            certificate_type_id=cert_type_id,
-            draft_id=draft_id,
-            job_timeout=300
-        )
-        queued += 1
+        queued_ids.append(user.id)
 
     db.session.add(AuditLog(
         action='batch_send_initiated', performed_by=current_user.email,
-        details={'count': queued, 'cert_type_id': cert_type_id}
+        details={'count': len(queued_ids), 'cert_type_id': cert_type_id}
     ))
     db.session.commit()
-    return jsonify({'message': f'{queued} certificates queued for dispatch'})
+
+    if queued_ids:
+        enqueue_batch(queued_ids, cert_type_id, draft_id)
+
+    return jsonify({'message': f'{len(queued_ids)} certificates queued for dispatch'})
 
 
 @bp.route('/api/send-all-approved', methods=['POST'])
@@ -428,32 +486,120 @@ def send_all_approved():
     if not users:
         return jsonify({'message': 'No approved participants found'})
 
+    from app.services.email.queue import enqueue_batch
+
+    queued_ids = []
     for user in users:
         user.status = 'sending'
         user.sent_at = datetime.utcnow()
-        current_app.task_queue.enqueue(
-            'app.worker.generate_and_send_certificate',
-            user_id=user.id,
-            certificate_type_id=cert_type_id,
-            draft_id=draft_id,
-            job_timeout=300
-        )
+        queued_ids.append(user.id)
 
     db.session.add(AuditLog(
         action='send_all_approved', performed_by=current_user.email,
-        details={'count': len(users), 'cert_type_id': cert_type_id}
+        details={'count': len(queued_ids), 'cert_type_id': cert_type_id}
     ))
     db.session.commit()
-    return jsonify({'message': f'{len(users)} certificates queued for dispatch'})
+
+    enqueue_batch(queued_ids, cert_type_id, draft_id)
+
+    return jsonify({'message': f'{len(queued_ids)} certificates queued for dispatch'})
 
 
 @bp.route('/api/nudge', methods=['POST'])
 @login_required
 def nudge_user():
+    from app.services.email.queue import run_in_background
+    from app.worker import send_nudge_email
+
     uid = request.json['user_id']
-    current_app.task_queue.enqueue(
-        'app.worker.send_nudge_email', user_id=uid, job_timeout=30)
+    run_in_background(send_nudge_email, user_id=uid)
     return jsonify({'message': 'Reminder queued'})
+
+
+@bp.route('/api/users/<int:uid>/certificate.pdf')
+@login_required
+def download_user_certificate(uid):
+    """View/download a registrant's generated certificate. Generates on
+    demand if the registrant is approved but the archive copy is missing."""
+    from flask import send_file
+    from app.services.certgen import generate_for_user
+
+    user = db.session.get(User, uid)
+    if not user:
+        return jsonify({'error': 'Not found'}), 404
+
+    archive = CertArchive.query.filter_by(certificate_id=user.certificate_id).first()
+    pdf_bytes = archive.pdf_binary if archive and archive.pdf_binary else None
+
+    if not pdf_bytes:
+        if user.status not in ('approved', 'sending', 'sent'):
+            return jsonify({'error': 'Certificate not generated — registrant is not approved yet'}), 409
+        cert_type = db.session.get(CertificateType, user.certificate_type_id)
+        org = OrgSettings.query.first() or OrgSettings()
+        try:
+            pdf_bytes = generate_for_user(user, cert_type, org)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': f'Generation failed: {e}'}), 500
+
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=request.args.get('download') == '1',
+        download_name=f"Certificate_{user.certificate_id}.pdf",
+    )
+
+
+@bp.route('/api/users/<int:uid>/regenerate', methods=['POST'])
+@login_required
+def regenerate_user_certificate(uid):
+    """Re-render an approved registrant's certificate (e.g. after fixing a
+    name) and replace the archived copy."""
+    from app.services.certgen import generate_for_user
+
+    user = db.session.get(User, uid)
+    if not user:
+        return jsonify({'error': 'Not found'}), 404
+    if user.status not in ('approved', 'sending', 'sent'):
+        return jsonify({'error': 'Only approved registrants have certificates'}), 409
+
+    cert_type = db.session.get(CertificateType, user.certificate_type_id)
+    org = OrgSettings.query.first() or OrgSettings()
+    try:
+        generate_for_user(user, cert_type, org)
+        db.session.add(AuditLog(user_id=uid, action='regenerated',
+                                performed_by=current_user.email,
+                                details={'cert_id': user.certificate_id}))
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Generation failed: {e}'}), 500
+    return jsonify({'message': 'Certificate regenerated'})
+
+
+@bp.route('/api/revoke', methods=['POST'])
+@login_required
+def revoke_certificates():
+    """Revoke issued certificates — mirrors the MedLocum revocation flow.
+    Revoked certificates fail public verification."""
+    user_ids = request.json['user_ids']
+    users = User.query.filter(User.id.in_(user_ids)).all()
+    revoked = 0
+    for u in users:
+        if not u.certificate_id:
+            continue
+        u.revoked_at = datetime.utcnow()
+        u.status = 'revoked'
+        archive = CertArchive.query.filter_by(certificate_id=u.certificate_id).first()
+        if archive:
+            archive.status = 'revoked'
+        db.session.add(AuditLog(user_id=u.id, action='revoked',
+                                performed_by=current_user.email,
+                                details={'cert_id': u.certificate_id}))
+        revoked += 1
+    db.session.commit()
+    return jsonify({'message': f'{revoked} certificates revoked'})
 
 
 @bp.route('/api/delete', methods=['POST'])
@@ -582,12 +728,14 @@ def create_campaign():
     db.session.commit()
 
     if send_now:
-        current_app.task_queue.enqueue(
-            'app.worker.process_campaign',
+        from app.services.email.queue import run_in_background
+        from app.worker import process_campaign
+
+        run_in_background(
+            process_campaign,
             campaign_id=campaign.id,
             user_ids=user_ids,
             draft_id=draft_id,
-            job_timeout=600
         )
         campaign.status = 'scheduled'
         db.session.commit()
@@ -692,20 +840,31 @@ def lms_users():
 
 @bp.route('/verify/<cert_id>')
 def verify_cert(cert_id):
+    """Public certificate verification (the QR code target). Mirrors the
+    MedLocum semantics: a certificate verifies only if it exists and has
+    not been revoked."""
+    revoked = False
     record = CertArchive.query.filter_by(certificate_id=cert_id).first()
+    if record and record.status == 'revoked':
+        revoked = True
     if not record:
         user = User.query.filter_by(certificate_id=cert_id).first()
         if user:
+            revoked = user.revoked_at is not None or user.status == 'revoked'
             record = type('R', (), {
                 'certificate_id': user.certificate_id,
                 'full_name': user.full_name,
                 'cert_name': user.certificate_type.name if user.certificate_type else '',
-                'issued_date': user.sent_at.strftime('%d %B %Y') if user.sent_at else '',
+                'issued_date': (user.sent_at or user.approved_at).strftime('%d %B %Y')
+                               if (user.sent_at or user.approved_at) else '',
                 'status': user.status,
             })()
+    if revoked:
+        record = None
     fmt_valid = verify_format(cert_id)
     return render_template('public/verify.html',
-                           record=record, fmt_valid=fmt_valid, cert_id=cert_id)
+                           record=record, fmt_valid=fmt_valid,
+                           revoked=revoked, cert_id=cert_id)
 
 
 # unsubscribe route lives in email_routes.py to avoid duplicate endpoint

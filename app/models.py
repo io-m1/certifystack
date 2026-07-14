@@ -30,20 +30,31 @@ class OrgSettings(db.Model):
 
 
 class CertificateType(db.Model):
+    """A certificate gateway. Each row owns a public registration link
+    (/register/<registration_token>) and defines how its certificate renders:
+    'mlj' (the MedLocum designed certificate, no template needed) or
+    'overlay' (legacy: text overlaid on an uploaded master PDF/PNG)."""
+
     __tablename__ = 'certificate_types'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
     course_code = db.Column(db.String(20), default='GEN')
     period = db.Column(db.String(100), nullable=False)
-    master_pdf_path = db.Column(db.String(500), nullable=False)
+    master_pdf_path = db.Column(db.String(500), nullable=False, default='')
     master_file_type = db.Column(db.String(10), default='pdf')
-    overlay_coords = db.Column(db.JSON, nullable=False)
+    overlay_coords = db.Column(db.JSON, nullable=False, default=dict)
     ocr_regions = db.Column(db.JSON, nullable=True)
     registration_token = db.Column(db.String(100), unique=True, nullable=False)
     email_subject = db.Column(db.String(300), nullable=True)
     email_message = db.Column(db.Text, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     seq_counter = db.Column(db.Integer, default=0)
+    render_mode = db.Column(db.String(10), default='mlj')
+    organisation = db.Column(db.String(200), default='')
+    website = db.Column(db.String(200), default='')
+    signatory_name = db.Column(db.String(200), default='')
+    signatory_title = db.Column(db.String(200), default='')
+    duration_hours = db.Column(db.Float, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     users = db.relationship('User', backref='certificate_type', lazy=True)
@@ -64,6 +75,8 @@ class User(db.Model):
     completion_status = db.Column(db.String(50), nullable=True)
     source = db.Column(db.String(50), default='manual')
     approved_at = db.Column(db.DateTime)
+    generated_at = db.Column(db.DateTime)
+    revoked_at = db.Column(db.DateTime)
     sent_at = db.Column(db.DateTime)
     archived_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

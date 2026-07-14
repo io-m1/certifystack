@@ -32,17 +32,23 @@ footer{margin-top:20px;font-size:11px;color:#9ca3af}
     <div class="detail-row"><span class="detail-label">Issued</span><span class="detail-value">{{ record.issued_date }}</span></div>
     <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">{{ record.status | upper }}</span></div>
     <div><span class="cert-id">{{ record.certificate_id }}</span></div>
-    {% if luhn_valid %}
-      <div><span class="badge badge-valid">✓ Luhn Verified — Authentic ID</span></div>
+    {% if fmt_valid %}
+      <div><span class="badge badge-valid">✓ Authentic Certificate ID</span></div>
     {% else %}
       <div><span class="badge badge-warn">⚠ ID format mismatch</span></div>
     {% endif %}
+  {% elif revoked %}
+    <div class="icon">🚫</div>
+    <div class="title">Certificate Revoked</div>
+    <div class="subtitle">This certificate is no longer valid:</div>
+    <div><span class="cert-id">{{ cert_id }}</span></div>
+    <div><span class="badge badge-invalid">✗ Revoked by the issuing organisation</span></div>
   {% else %}
     <div class="icon">❌</div>
     <div class="title">Not Found</div>
     <div class="subtitle">No certificate found for ID:</div>
     <div><span class="cert-id">{{ cert_id }}</span></div>
-    {% if not luhn_valid %}
+    {% if not fmt_valid %}
       <div><span class="badge badge-invalid">✗ Invalid ID format</span></div>
     {% else %}
       <div><span class="badge badge-warn">⚠ ID valid but not registered</span></div>
