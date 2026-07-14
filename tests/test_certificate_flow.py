@@ -66,6 +66,63 @@ def test_renderer_facade_uses_mlj_mode_without_template(app):
     assert pdf.startswith(b'%PDF')
 
 
+def test_certificate_never_prints_verification_url(app):
+    """QR may encode the verify URL, but no URL text appears on the paper."""
+    from io import BytesIO
+
+    from PyPDF2 import PdfReader
+
+    from app.engine.mlj_certificate import render_mlj_certificate
+
+    pdf = render_mlj_certificate(
+        full_name='Jane Smith',
+        course_title='Advanced Cardiac Life Support',
+        certificate_id='MLJ-ACLS-2026-000001',
+        verify_url='https://certs.test/verify/MLJ-ACLS-2026-000001',
+        include_qr=True,
+    )
+    text = PdfReader(BytesIO(pdf)).pages[0].extract_text() or ''
+    assert 'Jane Smith' in text
+    assert 'http' not in text.lower()
+    assert 'certs.test' not in text
+
+
+def test_overlay_engine_masks_baked_in_names(app, tmp_path):
+    """An uploaded sample with a baked-in specimen name renders cleanly:
+    clear boxes paint over the baked text before the real name is drawn."""
+    from io import BytesIO
+
+    from PyPDF2 import PdfReader
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    from app.engine.pdf_processor import generate_personalized_pdf
+
+    master = tmp_path / 'master.pdf'
+    c = canvas.Canvas(str(master), pagesize=A4)
+    c.setFont('Helvetica-Bold', 30)
+    c.drawCentredString(A4[0] / 2, 400, 'SPECIMEN NAME')
+    c.save()
+
+    pdf = generate_personalized_pdf(
+        master_pdf_path=str(master),
+        overlay_coords={
+            'name_x': A4[0] / 2, 'name_y': 400, 'name_w': 400, 'name_h': 40,
+            'name_clear': True,
+            'clear_boxes': [{'x': 40, 'y': 40, 'w': 200, 'h': 30, 'color': '#f5f3ec'}],
+        },
+        full_name='Grace Hopper',
+        certificate_id='MLJ-GEN-2026-000042',
+        issuance_date='01 March 2026',
+        include_qr=True,
+        verify_url='https://certs.test/verify/MLJ-GEN-2026-000042',
+    )
+    assert pdf.startswith(b'%PDF')
+    text = PdfReader(BytesIO(pdf)).pages[0].extract_text() or ''
+    assert 'Grace Hopper' in text
+    assert 'http' not in text.lower()
+
+
 # ── Gateway creation ──────────────────────────────────────────────
 
 

@@ -9,7 +9,7 @@ TEMPLATE_VARS = {
     'course_name':        'Certificate / course name',
     'issue_date':         'Date certificate was issued',
     'organization_name':  'Organisation name',
-    'verification_link':  'QR verification URL',
+    'verification_link':  'Verification URL (opt-in: only included where you place it)',
     'unsubscribe_link':   'Unsubscribe URL (campaigns only)',
 }
 
@@ -24,9 +24,6 @@ Please find your personalised certificate attached to this email.
 
 Certificate ID: {{certificate_id}}
 Issued: {{issue_date}}
-
-Verify this certificate online:
-{{verification_link}}
 
 This certificate is issued by {{organization_name}} as official confirmation \
 of your achievement. Please retain it for your records.

@@ -42,6 +42,68 @@ def _make_qr(data: str, size: int = 90) -> io.BytesIO:
     return buf
 
 
+def _hex_color(value, default='#ffffff'):
+    from reportlab.lib.colors import HexColor
+    try:
+        return HexColor(value or default)
+    except Exception:
+        return HexColor(default)
+
+
+def _paint_clear_boxes(c, overlay_coords: dict, page_w: float, page_h: float,
+                       name_x: float, name_y: float, name_w: float, name_h: float):
+    """Mask regions of the master template before drawing fresh text.
+
+    Uploaded samples often carry baked-in specimen names, dates or IDs. Two
+    mechanisms hide them so the personalized text renders on a clean surface:
+
+      - overlay_coords['clear_boxes']: explicit rectangles
+        [{x, y, w, h, color}] painted in the given fill (default white).
+      - overlay_coords['name_clear']: truthy convenience flag (or a dict with
+        pad/color overrides) that paints a band behind the name position,
+        sized from the name box itself.
+    """
+    boxes = list(overlay_coords.get('clear_boxes') or [])
+
+    name_clear = overlay_coords.get('name_clear')
+    if name_clear:
+        opts = name_clear if isinstance(name_clear, dict) else {}
+        pad = float(opts.get('pad', 10))
+        band_w = name_w + pad * 2
+        band_h = max(name_h, 30) + pad * 2
+        align = overlay_coords.get('name_align', 'center')
+        if align == 'center':
+            bx = name_x - band_w / 2
+        elif align == 'right':
+            bx = name_x - band_w
+        else:
+            bx = name_x - pad
+        boxes.append({
+            'x': bx,
+            'y': name_y - pad - max(name_h, 30) * 0.25,
+            'w': band_w,
+            'h': band_h,
+            'color': opts.get('color', '#ffffff'),
+        })
+
+    for box in boxes:
+        try:
+            x = float(box.get('x', 0))
+            y = float(box.get('y', 0))
+            w = float(box.get('w', 0))
+            h = float(box.get('h', 0))
+        except (TypeError, ValueError):
+            continue
+        if w <= 0 or h <= 0:
+            continue
+        c.setFillColor(_hex_color(box.get('color')))
+        c.rect(max(0, x), max(0, y), min(w, page_w), min(h, page_h),
+               stroke=0, fill=1)
+
+    from reportlab.lib.colors import black
+    c.setFillColor(black)
+
+
 def _auto_font_size(text: str, max_width: float, max_height: float,
                     font_name: str, start_size: int = 32) -> int:
     from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -111,6 +173,9 @@ def generate_personalized_pdf(
     start_size = overlay_coords.get('name_font_size', 32)
     font_size = _auto_font_size(full_name, name_w, name_h, name_font, start_size)
 
+    _paint_clear_boxes(c, overlay_coords, page_w, page_h,
+                       name_x, name_y, name_w, name_h)
+
     c.setFont(name_font, font_size)
     if name_align == 'center':
         c.drawCentredString(name_x, name_y, full_name)
@@ -132,8 +197,7 @@ def generate_personalized_pdf(
     c.drawString(date_x, date_y, issuance_date)
 
     if include_qr:
-        qr_url = verify_url or f"CERT:{certificate_id}"
-        qr_data = f"{qr_url}|{full_name}|{cert_name}|PASSED|{issuance_date}"
+        qr_data = verify_url or f"CERT:{certificate_id}"
         qr_buf = _make_qr(qr_data)
         qr_size = overlay_coords.get('qr_size', 72)
         qr_x = overlay_coords.get('qr_x', page_w - qr_size - 20)

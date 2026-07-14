@@ -7,32 +7,33 @@
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
 <style>
 :root{
-  --g:#1a7a3c;--gd:#145e2e;--gl:#e8f5ec;--g2:#2e9e55;
-  --red:#dc2626;--amber:#d97706;--blue:#1d6fa4;--purple:#7c3aed;
-  --bg:#f0f2f5;--card:#fff;--border:#e5e7eb;--text:#111827;--muted:#6b7280;
-  --r:10px;--sh:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
-  --sh2:0 4px 24px rgba(0,0,0,.12);
+  --g:#2362EB;--gd:#1a54cc;--gl:#eef4fe;--g2:#3b82f6;
+  --navy:#030E25;--navy2:#0a1e3d;
+  --red:#dc2626;--amber:#b45309;--blue:#2362EB;--purple:#5b5bd6;
+  --bg:#f5f7fb;--card:#fff;--border:#e6e9f0;--text:#0f172a;--muted:#64748b;
+  --r:12px;--sh:0 1px 2px rgba(3,14,37,.05),0 1px 3px rgba(3,14,37,.04);
+  --sh2:0 12px 40px rgba(3,14,37,.16);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;-webkit-font-smoothing:antialiased}
 
 /* LAYOUT */
 .app{display:flex;flex-direction:column;min-height:100vh}
-.topbar{background:var(--g);color:#fff;padding:0 20px;height:52px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-.topbar-logo{font-size:17px;font-weight:800;letter-spacing:-.3px;display:flex;align-items:center;gap:8px}
+.topbar{background:var(--navy);color:#fff;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.topbar-logo{font-size:16px;font-weight:700;letter-spacing:-.2px;display:flex;align-items:baseline;gap:10px}
+.topbar-logo .sub{font-size:10px;font-weight:600;letter-spacing:1.6px;text-transform:uppercase;color:rgba(255,255,255,.45)}
 .topbar-right{display:flex;align-items:center;gap:16px}
-.topbar-right a{color:rgba(255,255,255,.8);text-decoration:none;font-size:12px}
+.topbar-right a{color:rgba(255,255,255,.7);text-decoration:none;font-size:12px;font-weight:600;letter-spacing:.3px}
 .topbar-right a:hover{color:#fff}
 
 /* SIDEBAR + CONTENT (desktop) */
 .layout{display:flex;flex:1}
-.sidebar{width:210px;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;position:sticky;top:52px;height:calc(100vh - 52px);overflow-y:auto}
-.sidebar-section{padding:16px 12px 4px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}
-.nav-btn{display:flex;align-items:center;gap:10px;padding:9px 14px;border:none;background:none;cursor:pointer;color:var(--muted);font-size:13px;font-weight:500;width:100%;text-align:left;border-radius:7px;margin:1px 0;transition:.15s}
+.sidebar{width:220px;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto;padding:6px 10px}
+.sidebar-section{padding:18px 12px 6px;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:1.2px}
+.nav-btn{display:flex;align-items:center;padding:9px 14px;border:none;background:none;cursor:pointer;color:#475569;font-size:13px;font-weight:500;width:100%;text-align:left;border-radius:8px;margin:1px 0;transition:.15s}
 .nav-btn:hover{background:var(--gl);color:var(--g)}
 .nav-btn.active{background:var(--gl);color:var(--g);font-weight:700}
-.nav-btn .icon{font-size:16px;width:20px;text-align:center}
-.main{flex:1;padding:20px;overflow-x:hidden;min-width:0}
+.main{flex:1;padding:24px;overflow-x:hidden;min-width:0}
 
 /* PANELS */
 .panel{display:none}.panel.active{display:block}
@@ -48,9 +49,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
 /* LIBRARY GRID */
 .lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px}
-.lib-card{background:var(--card);border:2px solid var(--border);border-radius:var(--r);padding:16px 14px;cursor:pointer;transition:.2s;position:relative;text-align:center}
-.lib-card:hover,.lib-card.active{border-color:var(--g);background:var(--gl)}
-.lib-card .lc-icon{font-size:34px;margin-bottom:8px}
+.lib-card{background:var(--card);border:1.5px solid var(--border);border-radius:var(--r);padding:18px 14px;cursor:pointer;transition:.2s;position:relative;text-align:center}
+.lib-card:hover,.lib-card.active{border-color:var(--g);box-shadow:0 4px 16px rgba(35,98,235,.10)}
+.lib-card .lc-mono{width:44px;height:44px;border-radius:11px;background:var(--gl);color:var(--g);font-weight:800;font-size:14px;letter-spacing:.5px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px}
 .lib-card .lc-name{font-size:13px;font-weight:700;line-height:1.3}
 .lib-card .lc-period{font-size:11px;color:var(--muted);margin-top:3px}
 .lib-card .lc-meta{display:flex;justify-content:center;gap:8px;margin-top:6px}
@@ -91,8 +92,10 @@ table.dataTable tbody td{padding:8px;vertical-align:middle;border-bottom:1px sol
 .s-rejected{background:#fee2e2;color:#991b1b}
 .s-revoked{background:#fee2e2;color:#7f1d1d;text-decoration:line-through}
 .s-archived{background:#f3f4f6;color:#6b7280}
-.qr-toggle{cursor:pointer;font-size:17px;user-select:none;transition:.15s}
-.qr-toggle:hover{transform:scale(1.25)}
+.qr-toggle{cursor:pointer;user-select:none;display:inline-block;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.5px;transition:.15s;border:1px solid transparent}
+.qr-on{background:var(--gl);color:var(--g)}
+.qr-off{background:#f1f5f9;color:#94a3b8}
+.qr-toggle:hover{border-color:var(--g)}
 code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px;font-family:monospace}
 
 /* FORMS */
@@ -108,11 +111,10 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 .tpl-var:hover{background:var(--gl);color:var(--g)}
 
 /* DROP ZONE */
-.drop-zone{border:2px dashed var(--border);border-radius:var(--r);padding:28px;text-align:center;color:var(--muted);cursor:pointer;transition:.2s}
+.drop-zone{border:1.5px dashed #c7d2e4;border-radius:var(--r);padding:26px;text-align:center;color:var(--muted);cursor:pointer;transition:.2s;background:#fafbfe}
 .drop-zone:hover,.drop-zone.over{border-color:var(--g);background:var(--gl);color:var(--g)}
 .drop-zone input{display:none}
-.drop-zone .dz-icon{font-size:28px;margin-bottom:6px}
-.drop-zone .dz-label{font-size:13px;font-weight:500}
+.drop-zone .dz-label{font-size:13px;font-weight:600}
 .drop-zone .dz-sub{font-size:11px;margin-top:4px;opacity:.7}
 
 /* MODAL */
@@ -155,7 +157,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 .reg-link-box a{color:var(--g);font-weight:600;word-break:break-all;flex:1}
 
 /* TOAST */
-#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 20px;border-radius:25px;font-size:13px;z-index:999;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:11px 22px;border-radius:10px;font-size:13px;font-weight:500;z-index:999;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap;box-shadow:var(--sh2)}
 #toast.show{opacity:1}
 
 /* PROGRESS BAR */
@@ -184,8 +186,8 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 
 <!-- TOP BAR -->
 <div class="topbar">
-  <div class="topbar-logo">🏅 <span>CertifyStack</span>
-    <span class="sub" style="font-size:11px;opacity:.6;font-weight:400">by MLJ</span>
+  <div class="topbar-logo"><span>CertifyStack</span>
+    <span class="sub">Medical Locum Jobs</span>
   </div>
   <div class="topbar-right">
     <span id="activeCertBadge" style="background:rgba(255,255,255,.15);padding:3px 10px;border-radius:20px;font-size:11px;display:none"></span>
@@ -197,16 +199,16 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- SIDEBAR -->
 <nav class="sidebar">
   <div class="sidebar-section">Issuance</div>
-  <button class="nav-btn active" onclick="nav('library')" id="nav-library"><span class="icon">📚</span>Library</button>
-  <button class="nav-btn" onclick="nav('participants')" id="nav-participants"><span class="icon">👥</span>Participants</button>
+  <button class="nav-btn active" onclick="nav('library')" id="nav-library">Library</button>
+  <button class="nav-btn" onclick="nav('participants')" id="nav-participants">Participants</button>
   <div class="sidebar-section">Communication</div>
-  <button class="nav-btn" onclick="nav('messages')" id="nav-messages"><span class="icon">✉️</span>Messages</button>
-  <button class="nav-btn" onclick="nav('campaigns')" id="nav-campaigns"><span class="icon">📢</span>Campaigns</button>
+  <button class="nav-btn" onclick="nav('messages')" id="nav-messages">Messages</button>
+  <button class="nav-btn" onclick="nav('campaigns')" id="nav-campaigns">Campaigns</button>
   <div class="sidebar-section">System</div>
-  <button class="nav-btn" onclick="nav('audit')" id="nav-audit"><span class="icon">📋</span>Audit Log</button>
-  <button class="nav-btn" onclick="nav('email')" id="nav-email"><span class="icon">📨</span>Email Logs</button>
-  <button class="nav-btn" onclick="nav('dns')" id="nav-dns"><span class="icon">🔐</span>DNS Guide</button>
-  <button class="nav-btn" onclick="nav('settings')" id="nav-settings"><span class="icon">⚙️</span>Settings</button>
+  <button class="nav-btn" onclick="nav('audit')" id="nav-audit">Audit Log</button>
+  <button class="nav-btn" onclick="nav('email')" id="nav-email">Email Logs</button>
+  <button class="nav-btn" onclick="nav('dns')" id="nav-dns">DNS Guide</button>
+  <button class="nav-btn" onclick="nav('settings')" id="nav-settings">Settings</button>
 </nav>
 
 <!-- MAIN CONTENT -->
@@ -216,8 +218,8 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <div class="panel active" id="panel-library">
   <div class="card">
     <div class="card-header">
-      <div class="card-title">📚 Certificate Library</div>
-      <button class="btn btn-g btn-sm" onclick="openModal('addCertModal')">+ Add Certificate</button>
+      <div class="card-title">Certificate Library</div>
+      <button class="btn btn-g btn-sm" onclick="openModal('addCertModal')">Add Certificate</button>
     </div>
     <div class="lib-grid" id="libGrid"></div>
   </div>
@@ -226,7 +228,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- ═══════ PARTICIPANTS ═══════ -->
 <div class="panel" id="panel-participants">
   <div id="noSelMsg" class="card" style="text-align:center;padding:40px;color:var(--muted)">
-    ← Select a certificate from the Library to manage participants
+    Select a certificate from the Library to manage participants
   </div>
   <div id="participantsContent" style="display:none">
     <div class="card" style="padding:12px 16px">
@@ -236,11 +238,11 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
           <div style="font-size:12px;color:var(--muted)" id="pPeriod"></div>
         </div>
         <div class="spacer"></div>
-        <button class="btn btn-outline btn-sm" onclick="openModal('importModal')">⬆ Import CSV/XLSX</button>
-        <button class="btn btn-g btn-sm" onclick="openModal('addParticipantModal')">+ Add</button>
+        <button class="btn btn-outline btn-sm" onclick="openModal('importModal')">Import CSV/XLSX</button>
+        <button class="btn btn-g btn-sm" onclick="openModal('addParticipantModal')">Add Participant</button>
       </div>
       <div class="reg-link-box">
-        <span>🔗 Registration link:</span>
+        <span>Registration link</span>
         <a id="regLink" href="#" target="_blank">—</a>
         <button class="btn btn-xs btn-ghost" onclick="copyRegLink()">Copy</button>
       </div>
@@ -251,13 +253,13 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 
     <div class="card" style="padding:0;overflow:hidden">
       <div class="action-bar" style="padding:12px 14px 0">
-        <button class="btn btn-g btn-sm" onclick="batchApprove()">✓ Approve &amp; Generate</button>
-        <button class="btn btn-red btn-sm" onclick="batchReject()">✗ Reject</button>
-        <button class="btn btn-blue btn-sm" onclick="initSend(false)">📧 Send Selected</button>
-        <button class="btn btn-amber btn-sm" onclick="initSend(true)">📧 Send ALL Approved</button>
-        <button class="btn btn-ghost btn-sm" onclick="batchRevoke()">🚫 Revoke</button>
-        <button class="btn btn-ghost btn-sm" onclick="batchArchive()">📦 Archive</button>
-        <button class="btn btn-sm" style="background:#607d8b;color:#fff" onclick="batchDelete()">🗑 Delete</button>
+        <button class="btn btn-g btn-sm" onclick="batchApprove()">Approve &amp; Generate</button>
+        <button class="btn btn-red btn-sm" onclick="batchReject()">Reject</button>
+        <button class="btn btn-outline btn-sm" onclick="initSend(false)">Send Selected</button>
+        <button class="btn btn-outline btn-sm" onclick="initSend(true)">Send All Approved</button>
+        <button class="btn btn-ghost btn-sm" onclick="batchRevoke()">Revoke</button>
+        <button class="btn btn-ghost btn-sm" onclick="batchArchive()">Archive</button>
+        <button class="btn btn-ghost btn-sm" onclick="batchDelete()">Delete</button>
         <div class="spacer"></div>
         <select id="statusFilter" onchange="loadUsers()" style="padding:5px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
           <option value="">All statuses</option>
@@ -289,15 +291,15 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
     <div>
       <div class="card">
         <div class="card-header">
-          <div class="card-title">✉️ Email Drafts</div>
-          <button class="btn btn-g btn-sm" onclick="newDraft()">+ New Draft</button>
+          <div class="card-title">Email Drafts</div>
+          <button class="btn btn-g btn-sm" onclick="newDraft()">New Draft</button>
         </div>
         <div class="draft-list" id="draftList"></div>
       </div>
     </div>
     <div>
       <div class="card">
-        <div class="card-title" style="margin-bottom:12px">🔤 Template Variables</div>
+        <div class="card-title" style="margin-bottom:12px">Template Variables</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Click to copy:</div>
         <div class="tpl-vars" id="tplVarList"></div>
         <div style="margin-top:12px;font-size:11px;color:var(--muted);line-height:1.7">
@@ -313,8 +315,8 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <div class="panel" id="panel-campaigns">
   <div class="card">
     <div class="card-header">
-      <div class="card-title">📢 Campaigns</div>
-      <button class="btn btn-g btn-sm" onclick="openModal('campaignModal')">+ New Campaign</button>
+      <div class="card-title">Campaigns</div>
+      <button class="btn btn-g btn-sm" onclick="openModal('campaignModal')">New Campaign</button>
     </div>
     <div id="campaignList"></div>
   </div>
@@ -323,7 +325,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- ═══════ AUDIT ═══════ -->
 <div class="panel" id="panel-audit">
   <div class="card">
-    <div class="card-title" style="margin-bottom:14px">📋 Audit Log</div>
+    <div class="card-title" style="margin-bottom:14px">Audit Log</div>
     <div class="tbl-wrap">
       <table id="auditTable" class="display" style="width:100%">
         <thead><tr><th>Action</th><th>By</th><th>Details</th><th>Time</th></tr></thead>
@@ -336,7 +338,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- ═══════ SETTINGS ═══════ -->
 <div class="panel" id="panel-settings">
   <div class="card">
-    <div class="card-title" style="margin-bottom:16px">⚙️ Organisation & Sender Identity</div>
+    <div class="card-title" style="margin-bottom:16px">Organisation &amp; Sender Identity</div>
     <div class="form-grid">
       <div class="form-group"><label>Organisation Name</label><input id="sOrgName" placeholder="Medical Locum Jobs"></div>
       <div class="form-group"><label>Sender Display Name</label><input id="sSenderName" placeholder="Medical Locum Jobs Academy"></div>
@@ -354,7 +356,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
   <div class="stat-grid" id="emailStats" style="margin-bottom:16px"></div>
   <div class="card" style="margin-bottom:14px">
     <div class="card-header">
-      <div class="card-title">📨 Email Dispatch Log</div>
+      <div class="card-title">Email Dispatch Log</div>
       <div style="display:flex;gap:8px;align-items:center">
         <select id="logStatusFilter" onchange="loadEmailLogs()" style="padding:5px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
           <option value="">All</option>
@@ -363,7 +365,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
           <option value="pending">Pending</option>
           <option value="processing">Processing</option>
         </select>
-        <button class="btn btn-ghost btn-sm" onclick="loadEmailLogs()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadEmailLogs()">Refresh</button>
       </div>
     </div>
     <div class="tbl-wrap">
@@ -379,7 +381,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
   </div>
   <div class="card">
     <div class="card-header">
-      <div class="card-title">🔁 Failed — Retry Panel</div>
+      <div class="card-title">Failed — Retry Panel</div>
       <button class="btn btn-amber btn-sm" onclick="retrySelected()">Retry Selected</button>
     </div>
     <div id="failedList" style="font-size:13px;color:var(--muted)">Loading…</div>
@@ -389,7 +391,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- ═══════ DNS GUIDE ═══════ -->
 <div class="panel" id="panel-dns">
   <div class="card">
-    <div class="card-title" style="margin-bottom:4px">🔐 Email Authentication — DNS Setup</div>
+    <div class="card-title" style="margin-bottom:4px">Email Authentication — DNS Setup</div>
     <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Configure these records in your DNS panel to ensure reliable email delivery and avoid spam filtering.</p>
     <div id="dnsRecords"></div>
     <div id="dnsNotes" style="margin-top:16px;background:#f8f9fa;border-radius:8px;padding:14px"></div>
@@ -405,7 +407,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- ADD CERTIFICATE -->
 <div class="overlay" id="addCertModal">
 <div class="modal">
-  <button class="modal-close" onclick="closeModal('addCertModal')">✕</button>
+  <button class="modal-close" onclick="closeModal('addCertModal')">&times;</button>
   <h2>New Certificate Gateway</h2>
   <div class="form-grid">
     <div class="form-group"><label>Certificate Name</label><input id="acName" placeholder="Manual Handling Training"></div>
@@ -422,7 +424,6 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
   <div class="form-group">
     <label>Custom Template <span style="color:var(--muted);font-weight:400">(optional — leave empty for the MedLocum designed certificate)</span></label>
     <div class="drop-zone" id="dzCert" onclick="document.getElementById('acFile').click()">
-      <div class="dz-icon">🎓</div>
       <div class="dz-label" id="dzLabel">No file — the professionally designed MedLocum certificate will be used</div>
       <div class="dz-sub">Or upload a PDF/PNG master template to overlay names onto instead</div>
       <input type="file" id="acFile" accept=".pdf,.png" onchange="onFileSelect(this)">
@@ -440,14 +441,14 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- FIELD MAPPER -->
 <div class="overlay" id="mapperModal">
 <div class="modal modal-lg">
-  <button class="modal-close" onclick="closeModal('mapperModal')">✕</button>
-  <h2>📐 Field Placement</h2>
+  <button class="modal-close" onclick="closeModal('mapperModal')">&times;</button>
+  <h2>Field Placement</h2>
   <p style="font-size:12px;color:var(--muted);margin-bottom:14px">
     Set where each field appears on the certificate. X/Y are coordinates from bottom-left (PDF units). W = field width.
   </p>
   <div class="field-list" id="fieldList"></div>
   <div style="margin-top:12px;margin-bottom:14px">
-    <button class="btn btn-outline btn-sm" onclick="runPreview()">👁 Live Preview</button>
+    <button class="btn btn-outline btn-sm" onclick="runPreview()">Live Preview</button>
     <span style="font-size:11px;color:var(--muted);margin-left:10px">Opens generated certificate PDF in new tab</span>
   </div>
   <div class="modal-footer">
@@ -460,7 +461,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- ADD PARTICIPANT -->
 <div class="overlay" id="addParticipantModal">
 <div class="modal">
-  <button class="modal-close" onclick="closeModal('addParticipantModal')">✕</button>
+  <button class="modal-close" onclick="closeModal('addParticipantModal')">&times;</button>
   <h2>Add Participant</h2>
   <div class="form-grid">
     <div class="form-group"><label>First Name</label><input id="pFn"></div>
@@ -478,11 +479,10 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- IMPORT CSV/XLSX -->
 <div class="overlay" id="importModal">
 <div class="modal">
-  <button class="modal-close" onclick="closeModal('importModal')">✕</button>
-  <h2>⬆ Import Participants</h2>
+  <button class="modal-close" onclick="closeModal('importModal')">&times;</button>
+  <h2>Import Participants</h2>
   <p style="font-size:12px;color:var(--muted);margin-bottom:14px">CSV or XLSX. Required columns: <code>email</code>, <code>first_name</code>, <code>surname</code>. Optional: <code>score</code>, <code>completion_status</code>.</p>
   <div class="drop-zone" id="dzImport" onclick="document.getElementById('importFile').click()">
-    <div class="dz-icon">📊</div>
     <div class="dz-label" id="dzImportLabel">Click or drag CSV / XLSX here</div>
     <input type="file" id="importFile" accept=".csv,.xlsx,.xls" onchange="onImportSelect(this)">
   </div>
@@ -496,7 +496,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- SEND — DRAFT PICKER + CONFIRMATION -->
 <div class="overlay" id="sendModal">
 <div class="modal">
-  <button class="modal-close" onclick="closeModal('sendModal')">✕</button>
+  <button class="modal-close" onclick="closeModal('sendModal')">&times;</button>
   <h2 id="sendTitle">Send Certificates</h2>
 
   <!-- Step 1: draft picker -->
@@ -513,14 +513,14 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('sendModal')">Cancel</button>
-      <button class="btn btn-g" onclick="requestConfirmation()">Continue →</button>
+      <button class="btn btn-g" onclick="requestConfirmation()">Continue</button>
     </div>
   </div>
 
   <!-- Step 2: confirmation -->
   <div id="sendStep2" style="display:none">
     <div class="confirm-box">
-      <div class="cb-title">⚠ Please review before sending</div>
+      <div class="cb-title">Please review before sending</div>
       <div class="confirm-row"><span>Recipients</span><strong id="cfCount">—</strong></div>
       <div class="confirm-row"><span>Course</span><strong id="cfCourse">—</strong></div>
       <div class="confirm-row"><span>Sender</span><strong id="cfSender">—</strong></div>
@@ -528,8 +528,8 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
     </div>
     <p style="font-size:12px;color:var(--muted)">This action will generate and dispatch personalised certificates. It cannot be undone.</p>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="showStep(1)">← Back</button>
-      <button class="btn btn-g" onclick="confirmSend()">📧 Confirm & Send</button>
+      <button class="btn btn-ghost" onclick="showStep(1)">Back</button>
+      <button class="btn btn-g" onclick="confirmSend()">Confirm &amp; Send</button>
     </div>
   </div>
 </div>
@@ -538,7 +538,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- DRAFT EDITOR -->
 <div class="overlay" id="draftModal">
 <div class="modal modal-lg">
-  <button class="modal-close" onclick="closeModal('draftModal')">✕</button>
+  <button class="modal-close" onclick="closeModal('draftModal')">&times;</button>
   <h2 id="draftModalTitle">New Draft</h2>
   <div class="form-grid">
     <div class="form-group"><label>Draft Name</label><input id="dName" placeholder="Q1 2026 Dispatch"></div>
@@ -562,7 +562,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 <!-- CAMPAIGN MODAL -->
 <div class="overlay" id="campaignModal">
 <div class="modal">
-  <button class="modal-close" onclick="closeModal('campaignModal')">✕</button>
+  <button class="modal-close" onclick="closeModal('campaignModal')">&times;</button>
   <h2>New Campaign</h2>
   <div class="form-group"><label>Campaign Name</label><input id="campName" placeholder="March 2026 Newsletter"></div>
   <div class="form-group"><label>Certificate Group</label>
@@ -639,11 +639,11 @@ function nav(name){
 async function loadLibrary(){
   try{
     const res=await fetch('/api/cert-types');
-    if(!res.ok){toast('❌ Failed to load library');return}
+    if(!res.ok){toast('Failed to load library');return}
     certTypes=await res.json();
     if(!Array.isArray(certTypes))certTypes=[];
     renderLibrary();
-  }catch(e){toast('❌ Library load failed: '+e.message)}
+  }catch(e){toast('Library load failed: '+e.message)}
 }
 
 function renderLibrary(){
@@ -653,24 +653,24 @@ function renderLibrary(){
     const d=document.createElement('div');
     d.className='lib-card'+(activeCT&&activeCT.id===ct.id?' active':'');
     d.innerHTML=`
-      <button class="lc-del" onclick="delCT(event,${ct.id})" title="Remove">✕</button>
-      <div class="lc-icon">${ct.master_file_type==='png'?'🖼️':'📄'}</div>
+      <button class="lc-del" onclick="delCT(event,${ct.id})" title="Remove">&times;</button>
+      <div class="lc-mono">${(ct.course_code||'GEN').slice(0,3)}</div>
       <div class="lc-name">${ct.name}</div>
       <div class="lc-period">${ct.period}</div>
       <div class="lc-meta">
         <span class="lc-badge">${ct.course_code}</span>
-        <span class="lc-badge">${ct.user_count} pax</span>
+        <span class="lc-badge">${ct.user_count} enrolled</span>
       </div>
       <div style="display:flex;justify-content:center;gap:6px;margin-top:10px">
-        <button class="btn btn-xs btn-outline" onclick="openMapper(event,${ct.id})">📐 Fields</button>
-        <button class="btn btn-xs btn-outline" onclick="runPreviewFor(event,${ct.id})">👁 Preview</button>
+        <button class="btn btn-xs btn-outline" onclick="openMapper(event,${ct.id})">Fields</button>
+        <button class="btn btn-xs btn-outline" onclick="runPreviewFor(event,${ct.id})">Preview</button>
       </div>`;
     d.addEventListener('click',()=>selectCT(ct));
     g.appendChild(d);
   });
   const add=document.createElement('div');
   add.className='lib-card add-card';
-  add.innerHTML='<div style="font-size:28px">＋</div><div style="font-size:13px;font-weight:600">Add Certificate</div>';
+  add.innerHTML='<div style="font-size:13px;font-weight:700">Add Certificate</div><div style="font-size:11px;color:var(--muted)">Create a new issuance gateway</div>';
   add.onclick=()=>openModal('addCertModal');
   g.appendChild(add);
 }
@@ -695,7 +695,7 @@ async function delCT(e,id){
 // ── UPLOAD ─────────────────────────────────────────────────────────────────
 function onFileSelect(input){
   const lbl=document.getElementById('dzLabel');
-  lbl.textContent=input.files[0]?'✅ '+input.files[0].name:'Click or drag & drop master certificate';
+  lbl.textContent=input.files[0]?'Selected: '+input.files[0].name:'Click or drag & drop master certificate';
 }
 const dz=document.getElementById('dzCert');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over')});
@@ -734,8 +734,8 @@ async function uploadCert(){
   document.getElementById('dzLabel').textContent='No file — the professionally designed MedLocum certificate will be used';
   document.getElementById('acFile').value='';
   toast(data.render_mode==='mlj'
-    ?'✅ Gateway created — MedLocum designed certificate'
-    :'✅ Gateway created. OCR: '+(data.ocr_message||'done'));
+    ?'Gateway created — MedLocum designed certificate'
+    :'Gateway created. Template analysis: '+(data.ocr_message||'done'));
   loadLibrary();
 }
 
@@ -791,7 +791,7 @@ async function saveMapping(){
   await api('/api/cert-types/'+editingCTId,{
     method:'PUT', body:JSON.stringify({overlay_coords:coords})
   });
-  toast('✅ Field positions saved');
+  toast('Field positions saved');
   // Refresh activeCT if it's the same
   if(activeCT&&activeCT.id===editingCTId){
     activeCT.overlay_coords=coords;
@@ -841,7 +841,7 @@ async function loadUsers(){
     ajax:{
       url,
       dataSrc:'data',
-      error: function(xhr){ toast('❌ Failed to load participants ('+xhr.status+')'); }
+      error: function(xhr){ toast('Failed to load participants ('+xhr.status+')'); }
     },
     pageLength:15,
     columns:[
@@ -849,13 +849,13 @@ async function loadUsers(){
       {data:'full_name'},
       {data:'email',render:d=>`<span style="font-size:12px">${d}</span>`},
       {data:'certificate_id',render:d=>`<code class="cert-id">${d}</code>`},
-      {data:null,orderable:false,render:r=>`<span class="qr-toggle" title="${r.include_qr?'QR on':'QR off'}" onclick="toggleQR(${r.id},this)">${r.include_qr?'📲':'⬜'}</span>`},
+      {data:null,orderable:false,render:r=>`<span class="qr-toggle ${r.include_qr?'qr-on':'qr-off'}" title="Toggle QR" onclick="toggleQR(${r.id},this)">${r.include_qr?'QR ON':'QR OFF'}</span>`},
       {data:'status',render:d=>`<span class="status-badge s-${d}">${d}</span>`},
       {data:'score',render:d=>d!=null?`<span style="font-size:12px">${d}</span>`:'—'},
       {data:'created_at',render:d=>`<span style="font-size:11px;color:var(--muted)">${d}</span>`},
       {data:null,orderable:false,render:r=>{
         const cert=(r.generated||['approved','sending','sent'].includes(r.status))
-          ?`<a class="btn btn-xs btn-ghost" title="View certificate PDF" href="/api/users/${r.id}/certificate.pdf" target="_blank">📜 Cert</a>`
+          ?`<a class="btn btn-xs btn-outline" title="View certificate PDF" href="/api/users/${r.id}/certificate.pdf" target="_blank">Certificate</a>`
           :'';
         return cert+`<button class="btn btn-xs btn-ghost" onclick="nudge(${r.id})">Nudge</button>`;
       }},
@@ -888,43 +888,45 @@ function toggleAll(){$('.ucb').prop('checked',document.getElementById('selAll').
 async function toggleQR(uid,el){
   try{
     const d=await api('/api/users/toggle-qr',{method:'POST',body:JSON.stringify({user_id:uid})});
-    el.textContent=d.include_qr?'📲':'⬜'; el.title=d.include_qr?'QR on':'QR off';
+    el.textContent=d.include_qr?'QR ON':'QR OFF';
+    el.classList.toggle('qr-on',d.include_qr);
+    el.classList.toggle('qr-off',!d.include_qr);
     toast(d.include_qr?'QR enabled':'QR disabled');
-  }catch(e){toast('❌ QR toggle failed');}
+  }catch(e){toast('QR toggle failed');}
 }
 
 async function batchApprove(){
   const ids=getSelIds();
   if(!ids.length){toast('Select participants first');return}
-  try{const d=await api('/api/approve',{method:'POST',body:JSON.stringify({user_ids:ids})});toast('✅ '+d.message);loadUsers();}
-  catch(e){toast('❌ '+(e.error||'Approve failed'));}
+  try{const d=await api('/api/approve',{method:'POST',body:JSON.stringify({user_ids:ids})});toast(d.message);loadUsers();}
+  catch(e){toast(e.error||'Approve failed');}
 }
 async function batchReject(){
   const ids=getSelIds();
   if(!ids.length){toast('Select participants first');return}
   try{const d=await api('/api/reject',{method:'POST',body:JSON.stringify({user_ids:ids})});toast(d.message);loadUsers();}
-  catch(e){toast('❌ '+(e.error||'Reject failed'));}
+  catch(e){toast(e.error||'Reject failed');}
 }
 async function batchRevoke(){
   const ids=getSelIds();
   if(!ids.length){toast('Select participants first');return}
   if(!confirm(`Revoke ${ids.length} certificate(s)? They will fail public verification.`))return;
-  try{const d=await api('/api/revoke',{method:'POST',body:JSON.stringify({user_ids:ids})});toast('🚫 '+d.message);loadUsers();}
-  catch(e){toast('❌ '+(e.error||'Revoke failed'));}
+  try{const d=await api('/api/revoke',{method:'POST',body:JSON.stringify({user_ids:ids})});toast(d.message);loadUsers();}
+  catch(e){toast(e.error||'Revoke failed');}
 }
 async function batchArchive(){
   const ids=getSelIds();
   if(!ids.length){toast('Select participants first');return}
   if(!confirm(`Archive ${ids.length} participant(s)?`))return;
-  try{const d=await api('/api/users/archive',{method:'POST',body:JSON.stringify({user_ids:ids})});toast('📦 '+d.message);loadUsers();}
-  catch(e){toast('❌ '+(e.error||'Archive failed'));}
+  try{const d=await api('/api/users/archive',{method:'POST',body:JSON.stringify({user_ids:ids})});toast(d.message);loadUsers();}
+  catch(e){toast(e.error||'Archive failed');}
 }
 async function batchDelete(){
   const ids=getSelIds();
   if(!ids.length){toast('Select participants first');return}
   if(!confirm(`Delete ${ids.length} participant(s)? Certificate IDs preserved in archive.`))return;
-  try{const d=await api('/api/delete',{method:'POST',body:JSON.stringify({user_ids:ids})});toast('🗑 '+d.message);loadUsers();}
-  catch(e){toast('❌ '+(e.error||'Delete failed'));}
+  try{const d=await api('/api/delete',{method:'POST',body:JSON.stringify({user_ids:ids})});toast(d.message);loadUsers();}
+  catch(e){toast(e.error||'Delete failed');}
 }
 
 async function addParticipant(){
@@ -937,16 +939,16 @@ async function addParticipant(){
       first_name:fn,surname:sn,other_name:document.getElementById('pOn').value.trim(),
       email:em,cert_type_id:activeCT.id
     })});
-    toast(`✅ ${d.message} — ID: ${d.certificate_id}`);
+    toast(`${d.message} — ID: ${d.certificate_id}`);
     closeModal('addParticipantModal');
     ['pFn','pSn','pOn','pEm'].forEach(id=>document.getElementById(id).value='');
     loadUsers();
-  }catch(e){toast('❌ '+(e.error||'Failed to add participant'));}
+  }catch(e){toast(e.error||'Failed to add participant');}
 }
 
 function onImportSelect(input){
   document.getElementById('dzImportLabel').textContent=
-    input.files[0]?'✅ '+input.files[0].name:'Click or drag CSV / XLSX here';
+    input.files[0]?'Selected: '+input.files[0].name:'Click or drag CSV / XLSX here';
 }
 const dzi=document.getElementById('dzImport');
 dzi.addEventListener('dragover',e=>{e.preventDefault();dzi.classList.add('over')});
@@ -965,7 +967,7 @@ async function importParticipants(){
   const res=await fetch('/api/users/import',{method:'POST',body:fd});
   const d=await res.json();
   if(d.error){toast('Error: '+d.error);return}
-  toast('✅ '+d.message); closeModal('importModal');
+  toast(d.message); closeModal('importModal');
   document.getElementById('importFile').value='';
   document.getElementById('dzImportLabel').textContent='Click or drag CSV / XLSX here';
   loadUsers();
@@ -973,7 +975,7 @@ async function importParticipants(){
 
 async function nudge(uid){
   try{const d=await api('/api/nudge',{method:'POST',body:JSON.stringify({user_id:uid})});toast(d.message);}
-  catch(e){toast('❌ Nudge failed');}
+  catch(e){toast('Nudge failed');}
 }
 
 function copyRegLink(){
@@ -1020,7 +1022,7 @@ async function requestConfirmation(){
   const endpoint=sendAllMode?'/api/email/send-all-approved':'/api/email/send';
   let d;
   try{ d=await api(endpoint,{method:'POST',body:JSON.stringify(payload)}); }
-  catch(e){ toast('❌ '+(e.error||'Send request failed')); return; }
+  catch(e){ toast(e.error||'Send request failed'); return; }
   if(!d.needs_confirmation){toast(d.message||d.error||'Error');return}
   confirmData=d;
   document.getElementById('cfCount').textContent=d.recipient_count;
@@ -1040,9 +1042,9 @@ async function confirmSend(){
   const endpoint=sendAllMode?'/api/email/send-all-approved':'/api/email/send';
   let d;
   try{ d=await api(endpoint,{method:'POST',body:JSON.stringify(payload)}); }
-  catch(e){ toast('❌ '+(e.error||'Send failed')); return; }
+  catch(e){ toast(e.error||'Send failed'); return; }
   closeModal('sendModal');
-  toast('📧 '+d.message);
+  toast(d.message);
   loadUsers();
 }
 
@@ -1135,7 +1137,7 @@ async function saveDraft(){
   const url=editingDraftId?`/api/drafts/${editingDraftId}`:'/api/drafts';
   const method=editingDraftId?'PUT':'POST';
   const d=await api(url,{method,body:JSON.stringify(payload)});
-  toast('✅ '+d.message); closeModal('draftModal'); loadDrafts();
+  toast(d.message); closeModal('draftModal'); loadDrafts();
 }
 
 async function deleteDraft(id){
@@ -1199,7 +1201,7 @@ async function createCampaign(){
     include_attachment:false,
     send_now:document.getElementById('campSendNow').checked
   })});
-  toast('✅ '+d.message); closeModal('campaignModal'); loadCampaigns();
+  toast(d.message); closeModal('campaignModal'); loadCampaigns();
 }
 
 // ── AUDIT ──────────────────────────────────────────────────────────────────
@@ -1240,7 +1242,7 @@ async function saveSettings(){
     reply_to_email:document.getElementById('sReplyTo').value.trim(),
     verify_base_url:document.getElementById('sVerifyUrl').value.trim(),
   })});
-  toast('✅ '+d.message);
+  toast(d.message);
 }
 
 
@@ -1316,12 +1318,12 @@ async function retrySelected(){
   const ids=getSelLogIds();
   if(!ids.length){toast('Select failed emails first');return}
   const d=await api('/api/email/retry',{method:'POST',body:JSON.stringify({log_ids:ids})});
-  toast('🔁 '+d.message); loadEmailLogs();
+  toast(d.message); loadEmailLogs();
 }
 
 async function retryOne(id){
   const d=await api('/api/email/retry',{method:'POST',body:JSON.stringify({log_ids:[id]})});
-  toast('🔁 '+d.message); loadEmailLogs();
+  toast(d.message); loadEmailLogs();
 }
 
 async function retryAllFailed(){
@@ -1329,7 +1331,7 @@ async function retryAllFailed(){
   const ids=failed.map(f=>f.id);
   if(!ids.length){toast('No failed emails');return}
   const d=await api('/api/email/retry',{method:'POST',body:JSON.stringify({log_ids:ids})});
-  toast('🔁 '+d.message); loadEmailLogs();
+  toast(d.message); loadEmailLogs();
 }
 
 // ── DNS GUIDE ───────────────────────────────────────────────────────────────
@@ -1347,8 +1349,8 @@ async function loadDnsGuide(){
     </div>`).join('');
 
   document.getElementById('dnsNotes').innerHTML=
-    '<div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--text)">📌 Setup Notes</div>'+
-    data.notes.map(n=>`<div style="font-size:12px;color:var(--muted);padding:3px 0">• ${n}</div>`).join('');
+    '<div style="font-size:12px;font-weight:700;margin-bottom:8px;color:var(--text)">Setup Notes</div>'+
+    data.notes.map(n=>`<div style="font-size:12px;color:var(--muted);padding:3px 0">${n}</div>`).join('');
 }
 
 // Hook DNS panel nav

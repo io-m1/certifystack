@@ -14,7 +14,10 @@ template upload, overlay coordinates or OCR are needed:
   - completion statement, "Date Issued: {Month, Year}.", learning hours
   - footer: signature over gold rule, gold/green seal, training
     organisation block with QR code and certificate number
-  - verification URL line at the very bottom
+
+The QR code encodes the verification URL, but no URL text is ever printed
+on the certificate — verification links are shared by the admin through
+internal channels or the course delivery platform.
 
 Colours and geometry are transcribed 1:1 from the source template
 (mm positions, px font sizes at the CSS 96dpi -> pt ratio of 0.75).
@@ -348,18 +351,8 @@ def render_mlj_certificate(
     c.setFont(FONT_BOLD, 12 * PX)
     c.drawRightString(text_right, org_y, 'Training Organisation:')
 
-    # ── Verification line ─────────────────────────────────────────
-    if verify_url:
-        prefix = 'Verify this certificate at '
-        size = 8 * PX
-        total = stringWidth(prefix, FONT, size) + stringWidth(verify_url, FONT, size)
-        x = (PAGE_W - total) / 2
-        vy = 8 * MM
-        c.setFont(FONT, size)
-        c.setFillColor(GREY_FAINT)
-        c.drawString(x, vy, prefix)
-        c.setFillColor(GREEN_LINK)
-        c.drawString(x + stringWidth(prefix, FONT, size), vy, verify_url)
+    # No verification URL is printed on the certificate — the QR encodes it,
+    # and the admin shares links through internal channels only.
 
     c.save()
     return buf.getvalue()
