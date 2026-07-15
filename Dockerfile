@@ -10,6 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     libxext6 \
     poppler-utils \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libgdk-pixbuf-xlib-2.0-0 \
+    libffi-dev \
+    shared-mime-info \
+    potrace \
+    inkscape \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -17,8 +26,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p uploads
+RUN mkdir -p uploads archive
 
 EXPOSE 8080
 
-CMD ["gunicorn", "wsgi:app", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "120"]
+# start.sh runs migrations at container startup (runtime), then launches gunicorn.
+# Migrations must NOT run during build — the DB is unreachable then.
+CMD ["sh", "start.sh"]

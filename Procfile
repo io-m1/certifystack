@@ -1,1 +1,3 @@
-web: gunicorn wsgi:app --bind 0.0.0.0:8080 --workers 1 --timeout 120
+release: python migrate.py
+web: gunicorn wsgi:app
+worker: python app/worker_loop.py

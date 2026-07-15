@@ -260,6 +260,8 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
         <button class="btn btn-ghost btn-sm" onclick="batchRevoke()">Revoke</button>
         <button class="btn btn-ghost btn-sm" onclick="batchArchive()">Archive</button>
         <button class="btn btn-ghost btn-sm" onclick="batchDelete()">Delete</button>
+        <button class="btn btn-ghost btn-sm" onclick="purgeArchive()" title="Free storage by deleting archived PDFs; records are kept">Purge PDFs</button>
+        <button class="btn btn-ghost btn-sm" onclick="showArchiveStats()">Storage</button>
         <div class="spacer"></div>
         <select id="statusFilter" onchange="loadUsers()" style="padding:5px 9px;border:1.5px solid var(--border);border-radius:6px;font-size:12px">
           <option value="">All statuses</option>
@@ -276,7 +278,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
           <thead><tr>
             <th style="width:32px"><input type="checkbox" id="selAll" onchange="toggleAll()"></th>
             <th>Name</th><th>Email</th><th>Cert ID</th>
-            <th>QR</th><th>Status</th><th>Score</th><th>Registered</th><th></th>
+            <th>QR</th><th>Status</th><th>Registered</th><th>Certificate</th><th></th>
           </tr></thead>
           <tbody></tbody>
         </table>
@@ -373,7 +375,7 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
         <thead><tr>
           <th><input type="checkbox" id="logSelAll" onchange="toggleLogSel()"></th>
           <th>Recipient</th><th>Type</th><th>Status</th>
-          <th>Retries</th><th>Reason</th><th>Sent At</th>
+          <th>Retries</th><th>Reason</th><th>Sent At</th><th></th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -582,6 +584,35 @@ code.cert-id{font-size:10px;background:#f3f4f6;padding:2px 6px;border-radius:4px
 </div>
 </div>
 
+<!-- DISPATCH DETAIL -->
+<div class="overlay" id="logDetailModal">
+<div class="modal">
+  <button class="modal-close" onclick="closeModal('logDetailModal')">&times;</button>
+  <h2>Dispatch Detail</h2>
+  <div id="logDetailContent">
+    <div style="margin-bottom:12px;font-size:13px">
+      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:.6px">Recipient</div>
+      <div id="ldRecipient" style="font-weight:700;font-size:14px;margin-top:3px"></div>
+    </div>
+    <div style="margin-bottom:12px;font-size:13px">
+      <div style="color:var(--muted);font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:.6px">Status</div>
+      <div id="ldStatus" style="margin-top:4px"></div>
+    </div>
+    <div id="ldArchiveBox" style="margin-top:20px;padding:16px;background:var(--gl);border-radius:10px;border:1px solid #c7d9fb;display:none;text-align:center">
+      <div style="font-weight:700;font-size:13px;margin-bottom:4px">Personalised certificate generated</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Snapshot verified and stored in the archive.</div>
+      <button class="btn btn-g btn-sm" id="ldViewPdf" onclick="">Open PDF Snapshot</button>
+    </div>
+    <div id="ldNoArchive" style="margin-top:20px;padding:16px;background:#fef2f2;border-radius:10px;border:1px solid #fecaca;display:none;color:#991b1b;text-align:center">
+      <div style="font-size:12px">No certificate snapshot found. This happens for failed dispatches or non-certificate emails.</div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-ghost" onclick="closeModal('logDetailModal')">Close</button>
+  </div>
+</div>
+</div>
+
 <div id="toast"></div>
 
 <!-- ════════════════════════ SCRIPTS ════════════════════════ -->
@@ -662,6 +693,7 @@ function renderLibrary(){
         <span class="lc-badge">${ct.user_count} enrolled</span>
       </div>
       <div style="display:flex;justify-content:center;gap:6px;margin-top:10px">
+        ${ct.render_mode!=='mlj'?`<button class="btn btn-xs btn-outline" onclick="event.stopPropagation();window.location='/admin/templates/${ct.id}/map'">Mapper</button>`:''}
         <button class="btn btn-xs btn-outline" onclick="openMapper(event,${ct.id})">Fields</button>
         <button class="btn btn-xs btn-outline" onclick="runPreviewFor(event,${ct.id})">Preview</button>
       </div>`;
@@ -846,19 +878,19 @@ async function loadUsers(){
     pageLength:15,
     columns:[
       {data:'id',render:()=>'<input type="checkbox" class="ucb">',orderable:false,width:'32px'},
-      {data:'full_name'},
-      {data:'email',render:d=>`<span style="font-size:12px">${d}</span>`},
-      {data:'certificate_id',render:d=>`<code class="cert-id">${d}</code>`},
+      {data:'full_name',render:d=>`<div style="font-weight:700">${d}</div>`},
+      {data:'email',render:d=>`<div style="font-size:11px;color:var(--muted)">${d}</div>`},
+      {data:'certificate_id',render:d=>d&&d!=='—'?`<code class="cert-id">${d}</code>`:'—'},
       {data:null,orderable:false,render:r=>`<span class="qr-toggle ${r.include_qr?'qr-on':'qr-off'}" title="Toggle QR" onclick="toggleQR(${r.id},this)">${r.include_qr?'QR ON':'QR OFF'}</span>`},
       {data:'status',render:d=>`<span class="status-badge s-${d}">${d}</span>`},
-      {data:'score',render:d=>d!=null?`<span style="font-size:12px">${d}</span>`:'—'},
       {data:'created_at',render:d=>`<span style="font-size:11px;color:var(--muted)">${d}</span>`},
-      {data:null,orderable:false,render:r=>{
-        const cert=(r.generated||['approved','sending','sent'].includes(r.status))
-          ?`<a class="btn btn-xs btn-outline" title="View certificate PDF" href="/api/users/${r.id}/certificate.pdf" target="_blank">Certificate</a>`
-          :'';
-        return cert+`<button class="btn btn-xs btn-ghost" onclick="nudge(${r.id})">Nudge</button>`;
+      {data:'certificate_id',orderable:false,render:(id,t,r)=>{
+        if(id&&id!=='—'&&['approved','sending','sent'].includes(r.status)){
+          return `<a class="btn btn-xs btn-outline" title="Open the archived certificate PDF" href="/api/archive/view/${id}" target="_blank">View</a>`;
+        }
+        return '<span style="color:var(--muted)">—</span>';
       }},
+      {data:'id',orderable:false,render:id=>`<button class="btn btn-xs btn-ghost" onclick="nudge(${id})">Nudge</button>`},
     ],
     language:{emptyTable:'No participants'},
     dom:'<"top"f>rt<"bottom"ip>',
@@ -898,8 +930,13 @@ async function toggleQR(uid,el){
 async function batchApprove(){
   const ids=getSelIds();
   if(!ids.length){toast('Select participants first');return}
-  try{const d=await api('/api/approve',{method:'POST',body:JSON.stringify({user_ids:ids})});toast(d.message);loadUsers();}
-  catch(e){toast(e.error||'Approve failed');}
+  if(!activeCT){toast('Select a certificate type first');return}
+  toast('Approving and generating certificates…');
+  try{
+    const d=await api('/api/approve',{method:'POST',body:JSON.stringify({user_ids:ids,cert_type_id:activeCT.id})});
+    toast(d.message);
+    loadUsers();
+  }catch(e){toast(e.error||'Approve failed');}
 }
 async function batchReject(){
   const ids=getSelIds();
@@ -1279,6 +1316,7 @@ async function loadEmailLogs(){
       {data:'retry_count',render:d=>d>0?`<span style="color:var(--amber);font-size:12px">${d}x</span>`:'—'},
       {data:'failed_reason',render:d=>d?`<span style="font-size:11px;color:var(--red)">${d.slice(0,60)}</span>`:'—'},
       {data:'sent_at',render:d=>`<span style="font-size:11px;color:var(--muted)">${d||'—'}</span>`},
+      {data:'id',render:d=>`<button class="btn btn-xs btn-outline" onclick="viewLog(${d})">View</button>`,orderable:false},
     ],
     language:{emptyTable:'No email logs yet'}
   });
@@ -1366,7 +1404,42 @@ document.querySelectorAll('.nav-btn').forEach(b=>{
   }
 });
 
-// Patch nav() to auto-load panels
+// ── DISPATCH DETAIL ─────────────────────────────────────────────────────────
+async function viewLog(id){
+  const d = await api(`/api/email/logs/${id}`);
+  document.getElementById('ldRecipient').textContent = `${d.recipient_name||''} (${d.recipient_email})`;
+  document.getElementById('ldStatus').innerHTML = `<span class="status-badge s-${d.status==='sent'?'sent':d.status==='failed'?'rejected':'sending'}">${d.status}</span>`;
+  if(d.has_archive && d.certificate_id){
+    document.getElementById('ldArchiveBox').style.display = 'block';
+    document.getElementById('ldNoArchive').style.display = 'none';
+    document.getElementById('ldViewPdf').onclick = () => window.open(`/api/archive/view/${d.certificate_id}`, '_blank');
+  } else {
+    document.getElementById('ldArchiveBox').style.display = 'none';
+    document.getElementById('ldNoArchive').style.display = 'block';
+  }
+  openModal('logDetailModal');
+}
+
+function viewCert(certId){
+  window.open(`/api/archive/view/${certId}`, '_blank');
+}
+
+// ── ARCHIVE MANAGEMENT ──────────────────────────────────────────────────────
+async function purgeArchive(){
+  if(!activeCT){toast('Select a certificate type first');return}
+  if(!confirm('Delete all archived PDF files for this certificate type?\nDatabase records will be kept. Certificates can be regenerated on Send.'))return;
+  try{
+    const d=await api('/api/archive/purge',{method:'POST',body:JSON.stringify({cert_type_id:activeCT.id})});
+    toast(d.message+' (freed '+d.freed_mb+' MB)');
+  }catch(e){toast(e.error||'Purge failed');}
+}
+
+async function showArchiveStats(){
+  try{
+    const d=await api('/api/archive/stats');
+    toast('Archive: '+d.total_files+' files, '+d.total_size_mb+' MB');
+  }catch(e){toast('Failed to load storage stats');}
+}
 
 // ── INIT ────────────────────────────────────────────────────────────────────
 loadLibrary();

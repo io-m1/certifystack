@@ -1,36 +1,55 @@
 from flask import Blueprint, render_template, request, jsonify, current_app
 from flask_login import login_required, current_user
-from app.models import (db, User, CertificateType, AuditLog,
-                         CertArchive, EmailDraft, OrgSettings, Campaign)
-from app.engine.cert_id import generate_cert_id, next_sequence, verify_format
-from app.engine.ocr_analyzer import analyze_template
+from app.models import db, User, CertificateType, AuditLog, CertArchive, EmailDraft, OrgSettings, Campaign
+from app.engine.cert_id import assign_certificate_id, verify_format
 from datetime import datetime
-import uuid, os, json, io, csv
-
+import uuid
+import os
+import json
+import io
+import csv
+import hashlib
+from app.models import CertificateAsset
 bp = Blueprint('certificates', __name__)
-UPLOAD_FOLDER = 'uploads'
+
+from app.routes.template_upload import bp as template_upload_bp
+bp.register_blueprint(template_upload_bp)
+
+from app.routes.template_intelligence import bp as template_intelligence_bp
+bp.register_blueprint(template_intelligence_bp)
+
+
+@bp.route('/admin/templates/<int:cert_type_id>/map')
+@login_required
+def map_template(cert_type_id: int):
+    """Serve the WYSIWYG template mapping page."""
+    cert_type = CertificateType.query.get_or_404(cert_type_id)
+    return render_template('admin/template_mapper.html', cert_type=cert_type)
+
+
 
 @bp.route('/admin')
 @login_required
 def dashboard():
-    cert_types = CertificateType.query.filter_by(is_active=True)\
-        .order_by(CertificateType.created_at.desc()).all()
+    cert_types = CertificateType.query.filter_by(is_active=True).order_by(CertificateType.created_at.desc()).all()
     org = OrgSettings.query.first() or OrgSettings()
     drafts = EmailDraft.query.order_by(EmailDraft.updated_at.desc()).all()
-    return render_template('admin/dashboard.html',
-                           cert_types=cert_types, org=org, drafts=drafts)
+    return render_template('admin/dashboard.html', cert_types=cert_types, org=org, drafts=drafts)
+
+
+@bp.route('/admin/truth/certificates/<cert_id>')
+@login_required
+def resolve_certificate_truth(cert_id):
+    from app.engine.clp import resolve_truth
+    result = resolve_truth(cert_id)
+    return jsonify(result)
+
 
 @bp.route('/api/org', methods=['GET'])
 @login_required
 def get_org():
     org = OrgSettings.query.first() or OrgSettings()
-    return jsonify({
-        'org_name': org.org_name,
-        'sender_name': org.sender_name,
-        'sender_email': org.sender_email,
-        'reply_to_email': org.reply_to_email,
-        'verify_base_url': org.verify_base_url,
-    })
+    return jsonify({'org_name': org.org_name, 'sender_name': org.sender_name, 'sender_email': org.sender_email, 'reply_to_email': org.reply_to_email, 'verify_base_url': org.verify_base_url})
 
 
 @bp.route('/api/org', methods=['POST'])
@@ -47,132 +66,118 @@ def save_org():
     db.session.commit()
     return jsonify({'message': 'Settings saved'})
 
+
 @bp.route('/api/cert-types', methods=['GET'])
 @login_required
 def list_cert_types():
-    types = CertificateType.query.filter_by(is_active=True)\
-        .order_by(CertificateType.created_at.desc()).all()
-    return jsonify([{
-        'id': ct.id, 'name': ct.name, 'course_code': ct.course_code,
-        'period': ct.period, 'registration_token': ct.registration_token,
-        'master_file_type': ct.master_file_type,
-        'render_mode': ct.render_mode or 'mlj',
-        'user_count': len(ct.users),
-        'seq_counter': ct.seq_counter,
-    } for ct in types])
+    types = CertificateType.query.filter_by(is_active=True).order_by(CertificateType.created_at.desc()).all()
+    return jsonify([{'id': ct.id, 'name': ct.name, 'course_code': ct.course_code, 'period': ct.period, 'registration_token': ct.registration_token, 'master_file_type': ct.master_file_type, 'render_mode': getattr(ct, 'render_mode', None) or 'svg', 'user_count': len(ct.users), 'seq_counter': ct.seq_counter} for ct in types])
 
 
 @bp.route('/api/cert-types', methods=['POST'])
 @login_required
 def create_cert_type():
-    """Create a certificate gateway. Uploading a master template is now
-    optional: with a file the legacy overlay engine is used; without one the
-    gateway renders the MedLocum designed certificate (ported from the
-    medlocumjobs e-learning pipeline) — no coordinates or OCR needed."""
     file = request.files.get('master_file')
     name = request.form.get('name', '').strip()
     period = request.form.get('period', '').strip()
     course_code = request.form.get('course_code', 'GEN').strip().upper()
     if not name or not period:
-        return jsonify({'error': 'Name and period required'}), 400
+        return (jsonify({'error': 'Name and period required'}), 400)
 
-    token = str(uuid.uuid4())[:8]
-    ocr_result = {'regions': None, 'message': None}
-
-    if file:
-        ext = file.filename.rsplit('.', 1)[-1].lower()
-        if ext not in ('pdf', 'png'):
-            return jsonify({'error': 'Only PDF or PNG allowed'}), 400
-
-        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        filename = f"{uuid.uuid4().hex}.{ext}"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
-
-        overlay_coords = {
-            "name_x": 0, "name_y": 320, "name_w": 500, "name_h": 50,
-            "name_font_size": 30, "name_align": "center",
-            "cert_id_x": 60, "cert_id_y": 55, "cert_id_font_size": 9,
-            "date_x": 60, "date_y": 42, "date_font_size": 9,
-            "qr_x": -1, "qr_y": 22, "qr_size": 70
-        }
-        try:
-            custom = json.loads(request.form.get('overlay_coords') or 'null')
-            if custom:
-                overlay_coords.update(custom)
-        except Exception:
-            pass
-
-        try:
-            ocr_result = analyze_template(filepath, ext)
-        except Exception as ocr_err:
-            ocr_result = {'regions': [], 'message': f'OCR skipped: {ocr_err}'}
-
-        ct = CertificateType(
-            name=name, course_code=course_code, period=period,
-            render_mode='overlay',
-            master_pdf_path=filepath, master_file_type=ext,
-            overlay_coords=overlay_coords,
-            ocr_regions=ocr_result.get('regions'),
-            registration_token=token,
-            email_message=request.form.get('email_message', '').strip() or None,
-            email_subject=request.form.get('email_subject', '').strip() or None,
-            seq_counter=0,
-        )
-    else:
-        def _float(value, default=0.0):
+    if not file:
+        # No template upload: the gateway renders the branded MedLocum
+        # designed certificate (ported from the medlocumjobs platform).
+        def _float(v):
             try:
-                return float(value)
+                return float(v)
             except (TypeError, ValueError):
-                return default
+                return 0.0
 
         ct = CertificateType(
             name=name, course_code=course_code, period=period,
-            render_mode='mlj',
-            master_pdf_path='', master_file_type='',
-            overlay_coords={},
-            registration_token=token,
+            render_mode='mlj', master_pdf_path='', master_file_type='pdf',
+            overlay_coords={}, registration_token=str(uuid.uuid4())[:8],
+            duration_hours=_float(request.form.get('duration_hours')),
             organisation=request.form.get('organisation', '').strip(),
             website=request.form.get('website', '').strip(),
             signatory_name=request.form.get('signatory_name', '').strip(),
             signatory_title=request.form.get('signatory_title', '').strip(),
-            duration_hours=_float(request.form.get('duration_hours')),
-            email_message=request.form.get('email_message', '').strip() or None,
             email_subject=request.form.get('email_subject', '').strip() or None,
+            email_message=request.form.get('email_message', '').strip() or None,
             seq_counter=0,
         )
+        db.session.add(ct)
+        db.session.commit()
+        return jsonify({
+            'id': ct.id, 'name': ct.name, 'render_mode': 'mlj',
+            'registration_token': ct.registration_token,
+            'register_url': f'/register/{ct.registration_token}',
+            'ocr_message': 'No template needed — MedLocum designed certificate',
+        })
 
+    ext = file.filename.rsplit('.', 1)[-1].lower()
+    if ext not in ('pdf', 'png'):
+        return (jsonify({'error': 'Only PDF or PNG allowed'}), 400)
+    
+    master_binary = file.read()
+    file_hash = hashlib.md5(master_binary).hexdigest()
+    asset_id = str(uuid.uuid4())
+    
+    asset = CertificateAsset(
+        id=asset_id,
+        name=file.filename,
+        file_binary=master_binary,
+        file_hash=file_hash
+    )
+    db.session.add(asset)
+    db.session.flush()
+
+    overlay_coords = {'name_x': 150, 'name_y': 380, 'name_w': 500, 'name_h': 50, 'name_font_size': 28, 'name_align': 'center', 'cert_id_x': 400,
+                      'cert_id_y': 80, 'cert_id_font_size': 9, 'date_x': 150, 'date_y': 200, 'date_font_size': 9, 'qr_x': 0, 'qr_y': 30, 'qr_size': 90}
+    try:
+        custom = json.loads(request.form.get('overlay_coords') or 'null')
+        if custom:
+            overlay_coords.update(custom)
+    except Exception:
+        pass
+        
+    ocr_result = {'regions': [], 'message': 'OCR skipped for DB asset'}
+    token = str(uuid.uuid4())[:8]
+    
+    ct = CertificateType(name=name, course_code=course_code, period=period, asset_id=asset_id, master_pdf_path="", master_pdf_binary=None, master_file_type=ext, render_mode='svg', overlay_coords=overlay_coords, ocr_regions=ocr_result.get(
+        'regions'), registration_token=token, email_message=request.form.get('email_message', '').strip() or None, email_subject=request.form.get('email_subject', '').strip() or None, seq_counter=0)
     db.session.add(ct)
     db.session.commit()
 
-    return jsonify({
-        'id': ct.id, 'name': ct.name, 'registration_token': token,
-        'render_mode': ct.render_mode,
-        'register_url': f"/register/{token}",
-        'ocr_message': ocr_result.get('message'),
-        'ocr_regions': ocr_result.get('regions'),
-    })
+    # Automatically convert newly uploaded PDF template to SVG if possible
+    if ext == 'pdf':
+        try:
+            os.makedirs("uploads", exist_ok=True)
+            pdf_path = f"uploads/{ct.id}_master.pdf"
+            with open(pdf_path, 'wb') as f:
+                f.write(master_binary)
+            
+            from app.engine.template_converter import pdf_to_svg, add_placeholders_to_svg
+            svg_path = f"uploads/{ct.id}_master.svg"
+            pdf_to_svg(pdf_path, svg_path)
+            add_placeholders_to_svg(svg_path, ct.overlay_coords)
+            
+            ct.master_svg_path = svg_path
+            db.session.commit()
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+        except Exception as e:
+            # Safe silent fallback for robust operation
+            pass
+
+    return jsonify({'id': ct.id, 'name': ct.name, 'registration_token': token, 'register_url': f'/register/{token}', 'ocr_message': ocr_result.get('message'), 'ocr_regions': ocr_result.get('regions')})
 
 
 @bp.route('/api/cert-types/<int:ct_id>', methods=['GET'])
 @login_required
 def get_cert_type(ct_id):
     ct = CertificateType.query.get_or_404(ct_id)
-    return jsonify({
-        'id': ct.id, 'name': ct.name, 'course_code': ct.course_code,
-        'period': ct.period, 'master_file_type': ct.master_file_type,
-        'render_mode': ct.render_mode or 'mlj',
-        'overlay_coords': ct.overlay_coords,
-        'ocr_regions': ct.ocr_regions,
-        'organisation': ct.organisation,
-        'website': ct.website,
-        'signatory_name': ct.signatory_name,
-        'signatory_title': ct.signatory_title,
-        'duration_hours': ct.duration_hours,
-        'email_subject': ct.email_subject,
-        'email_message': ct.email_message,
-        'registration_token': ct.registration_token,
-    })
+    return jsonify({'id': ct.id, 'name': ct.name, 'course_code': ct.course_code, 'period': ct.period, 'master_file_type': ct.master_file_type, 'overlay_coords': ct.overlay_coords, 'ocr_regions': ct.ocr_regions, 'email_subject': ct.email_subject, 'email_message': ct.email_message, 'registration_token': ct.registration_token})
 
 
 @bp.route('/api/cert-types/<int:ct_id>', methods=['PUT'])
@@ -180,10 +185,7 @@ def get_cert_type(ct_id):
 def update_cert_type(ct_id):
     ct = CertificateType.query.get_or_404(ct_id)
     data = request.json or {}
-    for field in ('name', 'period', 'course_code', 'overlay_coords',
-                  'email_message', 'email_subject', 'ocr_regions',
-                  'organisation', 'website', 'signatory_name',
-                  'signatory_title', 'duration_hours'):
+    for field in ('name', 'period', 'course_code', 'overlay_coords', 'email_message', 'email_subject', 'ocr_regions'):
         if field in data:
             setattr(ct, field, data[field])
     db.session.commit()
@@ -198,53 +200,44 @@ def delete_cert_type(ct_id):
     db.session.commit()
     return jsonify({'message': 'Removed from library'})
 
+
+
+
+
+
 @bp.route('/api/cert-types/<int:ct_id>/analyze', methods=['POST'])
 @login_required
 def reanalyze_template(ct_id):
     ct = CertificateType.query.get_or_404(ct_id)
-    result = analyze_template(ct.master_pdf_path, ct.master_file_type)
-    ct.ocr_regions = result.get('regions')
-    db.session.commit()
-    return jsonify({'regions': ct.ocr_regions, 'message': result.get('message')})
+    return jsonify({'regions': [], 'message': 'OCR disabled for DB assets'})
 
 
 @bp.route('/api/cert-types/<int:ct_id>/preview', methods=['POST'])
 @login_required
 def preview_certificate(ct_id):
     from flask import send_file
+    from app.domain.certificates.service import render_certificate_bytes
+    from app.models import OrgSettings
     ct = CertificateType.query.get_or_404(ct_id)
     data = request.json or {}
     full_name = data.get('full_name', 'Jane Smith')
     cert_id = data.get('cert_id', 'MLJ-GEN-2026-000001')
-    include_qr = data.get('include_qr', True)
-    org = OrgSettings.query.first() or OrgSettings()
-
-    mode = ct.render_mode or ('overlay' if ct.master_pdf_path else 'mlj')
-    if mode == 'overlay' and not os.path.exists(ct.master_pdf_path or ''):
-        return jsonify({'error': 'Master certificate file not found on server. Please re-upload the template.'}), 404
-
-    preview_user = type('PreviewUser', (), {
-        'full_name': full_name,
-        'certificate_id': cert_id,
-        'include_qr': include_qr,
-        'sent_at': None,
-        'approved_at': None,
-    })()
-
     try:
-        from app.engine.renderer import render_certificate_pdf
-        pdf_bytes = render_certificate_pdf(preview_user, ct, org)
-    except FileNotFoundError:
-        return jsonify({'error': 'Master certificate file missing.'}), 404
+        names = full_name.split(None, 1)
+        sample = User(
+            first_name=names[0], surname=names[1] if len(names) > 1 else '',
+            email='preview@certifystack.local', certificate_type_id=ct.id,
+        )
+        sample.certificate_id = cert_id
+        sample.include_qr = bool(data.get('include_qr', True))
+        org = OrgSettings.query.first() or OrgSettings()
+        pdf_bytes = render_certificate_bytes(sample, ct, org, issued_at=datetime.utcnow())
+    except RuntimeError as e:
+        return (jsonify({'error': str(e)}), 404)
     except Exception as e:
-        return jsonify({'error': f'Failed to generate preview: {str(e)}'}), 500
+        return (jsonify({'error': f'Failed to generate preview: {str(e)}'}), 500)
+    return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf', as_attachment=False, download_name=f'preview_{ct_id}.pdf')
 
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype='application/pdf',
-        as_attachment=False,
-        download_name=f"preview_{ct_id}.pdf"
-    )
 
 @bp.route('/api/users/<int:cert_type_id>')
 @login_required
@@ -254,18 +247,7 @@ def get_users(cert_type_id):
     if status_filter:
         q = q.filter_by(status=status_filter)
     users = q.order_by(User.created_at.desc()).all()
-    return jsonify({'data': [{
-        'id': u.id,
-        'full_name': u.full_name,
-        'email': u.email,
-        'certificate_id': u.certificate_id or '—',
-        'status': u.status,
-        'include_qr': u.include_qr,
-        'score': u.score,
-        'source': u.source,
-        'generated': u.generated_at is not None,
-        'created_at': u.created_at.strftime('%d/%m/%Y %H:%M') if u.created_at else '',
-    } for u in users]})
+    return jsonify({'data': [{'id': u.id, 'full_name': u.full_name, 'email': u.email, 'certificate_id': u.certificate_id or '—', 'status': u.status, 'include_qr': u.include_qr, 'score': u.score, 'source': u.source, 'created_at': u.created_at.strftime('%d/%m/%Y %H:%M') if u.created_at else ''} for u in users]})
 
 
 @bp.route('/api/users/add', methods=['POST'])
@@ -274,31 +256,20 @@ def add_user():
     data = request.json or {}
     ct_id = data.get('cert_type_id')
     if not ct_id:
-        return jsonify({'error': 'cert_type_id required'}), 400
+        return (jsonify({'error': 'cert_type_id required'}), 400)
     ct = CertificateType.query.get_or_404(ct_id)
-
     first_name = (data.get('first_name') or '').strip()
-    surname    = (data.get('surname')    or '').strip()
-    email      = (data.get('email')      or '').strip().lower()
-    if not first_name or not surname or not email:
-        return jsonify({'error': 'first_name, surname and email required'}), 400
-
-    seq     = next_sequence(ct)
-    cert_id = generate_cert_id(ct.course_code, seq, datetime.utcnow())
-
-    user = User(
-        first_name=first_name,
-        surname=surname,
-        other_name=(data.get('other_name') or '').strip(),
-        email=email,
-        certificate_type_id=ct_id,
-        certificate_id=cert_id,
-        status='registered',
-        source='manual',
-    )
+    surname = (data.get('surname') or '').strip()
+    email = (data.get('email') or '').strip().lower()
+    if not first_name or not surname or (not email):
+        return (jsonify({'error': 'first_name, surname and email required'}), 400)
+    user = User(first_name=first_name, surname=surname, other_name=(data.get('other_name') or '').strip(),
+                email=email, certificate_type_id=ct_id, status='registered', source='manual')
     db.session.add(user)
+    db.session.flush()
+    cert_id = assign_certificate_id(user)
     db.session.add(AuditLog(action='registered', performed_by=current_user.email,
-                            details={'cert_id': cert_id, 'email': email}))
+                   details={'cert_id': cert_id, 'email': email}))
     db.session.commit()
     return jsonify({'message': 'Participant added', 'id': user.id, 'certificate_id': cert_id})
 
@@ -311,11 +282,9 @@ def import_users():
     ct = CertificateType.query.get_or_404(ct_id)
     file = request.files.get('file')
     if not file:
-        return jsonify({'error': 'File required'}), 400
-
+        return (jsonify({'error': 'File required'}), 400)
     ext = file.filename.rsplit('.', 1)[-1].lower()
     rows = []
-
     if ext == 'csv':
         content = file.read().decode('utf-8', errors='ignore')
         reader = csv.DictReader(io.StringIO(content))
@@ -327,39 +296,27 @@ def import_users():
         for row in ws.iter_rows(min_row=2, values_only=True):
             rows.append(dict(zip(headers, row)))
     else:
-        return jsonify({'error': 'CSV or XLSX only'}), 400
-
+        return (jsonify({'error': 'CSV or XLSX only'}), 400)
     imported = skipped = 0
     for row in rows:
         email = str(row.get('email') or row.get('Email') or '').strip().lower()
         first_name = str(row.get('first_name') or row.get('First Name') or row.get('firstname') or '').strip()
-        surname = str(row.get('surname') or row.get('last_name') or row.get('Last Name') or row.get('lastname') or '').strip()
+        surname = str(row.get('surname') or row.get('last_name') or row.get(
+            'Last Name') or row.get('lastname') or '').strip()
         if not email or not first_name:
             skipped += 1
             continue
-
-        if not first_name and not surname:
+        if not first_name and (not surname):
             full = str(row.get('full_name') or row.get('name') or '')
             parts = full.split()
             first_name = parts[0] if parts else ''
             surname = parts[-1] if len(parts) > 1 else ''
-
-        seq = next_sequence(ct)
-        cert_id = generate_cert_id(ct.course_code, seq, datetime.utcnow())
-
-        user = User(
-            first_name=first_name, surname=surname,
-            email=email,
-            certificate_type_id=int(ct_id),
-            certificate_id=cert_id,
-            status='registered',
-            score=float(row.get('score') or 0) if row.get('score') else None,
-            completion_status=str(row.get('completion_status') or '').strip() or None,
-            source='csv',
-        )
+        user = User(first_name=first_name, surname=surname, email=email, certificate_type_id=int(ct_id), status='registered', score=float(row.get(
+            'score') or 0) if row.get('score') else None, completion_status=str(row.get('completion_status') or '').strip() or None, source='csv')
         db.session.add(user)
+        db.session.flush()
+        assign_certificate_id(user)
         imported += 1
-
     db.session.commit()
     return jsonify({'message': f'{imported} imported, {skipped} skipped'})
 
@@ -370,7 +327,7 @@ def toggle_qr():
     uid = request.json.get('user_id')
     user = db.session.get(User, uid)
     if not user:
-        return jsonify({'error': 'Not found'}), 404
+        return (jsonify({'error': 'Not found'}), 404)
     user.include_qr = not user.include_qr
     db.session.commit()
     return jsonify({'include_qr': user.include_qr})
@@ -379,32 +336,138 @@ def toggle_qr():
 @bp.route('/api/approve', methods=['POST'])
 @login_required
 def approve_users():
-    """Approve (single or batch) after manual payment verification.
-    Approval immediately generates each registrant's certificate in the
-    background and archives the PDF — dispatch remains a separate,
-    admin-triggered step."""
-    from app.services.email.queue import run_in_background
-    from app.services.certgen import generate_certificates_job
+    """Approve users AND generate certificates immediately. PDF saved to archive."""
+    data = request.json or {}
+    user_ids = data.get('user_ids', [])
+    cert_type_id = data.get('cert_type_id')
 
-    user_ids = request.json['user_ids']
-    eligible = [u.id for u in User.query.filter(
+    if not user_ids:
+        return jsonify({'error': 'No users selected'}), 400
+
+    users = User.query.filter(
         User.id.in_(user_ids),
-        User.status.in_(['registered', 'rejected'])).all()]
+        User.status.in_(['registered', 'rejected'])
+    ).all()
 
-    User.query.filter(User.id.in_(eligible)).update(
-        {'status': 'approved', 'approved_at': datetime.utcnow()},
-        synchronize_session=False)
-    for uid in eligible:
-        db.session.add(AuditLog(user_id=uid, action='approved',
-                                performed_by=current_user.email))
+    if not users:
+        return jsonify({'error': 'No eligible users found in selection'}), 400
+
+    # Determine cert_type: from payload, or from the first user's cert type
+    cert_type = None
+    if cert_type_id:
+        cert_type = CertificateType.query.get(cert_type_id)
+    if not cert_type and users:
+        cert_type = users[0].certificate_type
+    if not cert_type:
+        return jsonify({'error': 'Certificate type not found'}), 404
+
+    from app.domain.certificates.service import render_certificate_bytes
+    from app.engine.cert_id import assign_certificate_id
+    from app.models import Certificate, CertificateStatus, OrgSettings
+
+    org = OrgSettings.query.first() or OrgSettings()
+
+    generated = 0
+    failed = 0
+    preview_urls = []
+
+    for user in users:
+        try:
+            # 1. Assign certificate ID if not yet assigned
+            if not user.certificate_id:
+                assign_certificate_id(user)
+                db.session.flush()
+
+            # 2. Generate the PDF through the shared render seam:
+            # SVG pipeline for uploaded templates, the MedLocum designed
+            # certificate for template-less ('mlj') gateways.
+            pdf_bytes = render_certificate_bytes(
+                user, cert_type, org, issued_at=datetime.utcnow()
+            )
+
+            if not pdf_bytes or len(pdf_bytes) == 0:
+                raise ValueError("Generated PDF bytes are empty or invalid")
+
+            current_app.logger.info(
+                f"PDF generated for {user.certificate_id} | size={len(pdf_bytes)} bytes"
+            )
+
+            # 3. Save to absolute archive directory
+            archive_dir = os.path.abspath('archive')
+            os.makedirs(archive_dir, exist_ok=True)
+            archive_path = os.path.join(archive_dir, f"{user.certificate_id}.pdf")
+            with open(archive_path, 'wb') as f:
+                f.write(pdf_bytes)
+
+            current_app.logger.info(
+                f"Archive exists={os.path.exists(archive_path)} path={archive_path}"
+            )
+
+            # 4. Ensure Certificate record is up to date
+            import hashlib
+            pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+            cert = Certificate.query.get(user.certificate_id)
+            if not cert:
+                cert = Certificate(
+                    id=user.certificate_id,
+                    user_id=user.id,
+                    cert_type_id=cert_type.id,
+                    asset_id=cert_type.asset_id,
+                    status=CertificateStatus.DRAFT
+                )
+                db.session.add(cert)
+                db.session.flush()
+
+            # Transition through states to READY_FOR_DISPATCH
+            if cert.status == CertificateStatus.DRAFT:
+                cert.transition_to_approved()
+            if cert.status == CertificateStatus.APPROVED_FOR_GENERATION:
+                cert.transition_to_generating()
+            cert.transition_to_generated(pdf_bytes, pdf_hash)
+            cert.transition_to_ready()
+
+            # 5. Approve the user
+            user.status = 'approved'
+            user.approved_at = datetime.utcnow()
+            user.generated_at = datetime.utcnow()
+
+            db.session.add(AuditLog(
+                user_id=user.id,
+                action='approved',
+                performed_by=current_user.email,
+                details={
+                    'certificate_generated': True,
+                    'archive_path': archive_path,
+                    'file_size_bytes': len(pdf_bytes)
+                }
+            ))
+
+            preview_urls.append(f"/api/archive/view/{user.certificate_id}")
+            generated += 1
+
+        except Exception as e:
+            current_app.logger.error(f"Failed to approve/generate for user {user.id}: {e}", exc_info=True)
+            db.session.add(AuditLog(
+                user_id=user.id,
+                action='approve_failed',
+                performed_by=current_user.email,
+                details={'error': str(e)}
+            ))
+            # Keep user status registered so they can be re-tried cleanly
+            user.status = 'registered'
+            failed += 1
+
     db.session.commit()
 
-    if eligible:
-        run_in_background(generate_certificates_job, user_ids=eligible)
+    msg = f'{generated} approved with certificates generated'
+    if failed:
+        msg += f', {failed} failed (PDF generation failed — kept status as registered)'
 
     return jsonify({
-        'message': f'{len(eligible)} approved — certificates are being generated',
-        'approved': len(eligible),
+        'message': msg,
+        'generated': generated,
+        'failed': failed,
+        'preview_urls': preview_urls[:5]
     })
 
 
@@ -412,10 +475,34 @@ def approve_users():
 @login_required
 def reject_users():
     user_ids = request.json['user_ids']
-    User.query.filter(User.id.in_(user_ids)).update(
-        {'status': 'rejected'}, synchronize_session=False)
+    User.query.filter(User.id.in_(user_ids)).update({'status': 'rejected'}, synchronize_session=False)
     db.session.commit()
     return jsonify({'message': f'{len(user_ids)} rejected'})
+
+
+@bp.route('/api/revoke', methods=['POST'])
+@login_required
+def revoke_users():
+    """Revoke issued certificates. Records are kept, but the certificates
+    fail public verification from this point on."""
+    user_ids = (request.json or {}).get('user_ids', [])
+    if not user_ids:
+        return (jsonify({'error': 'No users selected'}), 400)
+    revoked = 0
+    for user in User.query.filter(User.id.in_(user_ids)).all():
+        user.status = 'revoked'
+        user.revoked_at = datetime.utcnow()
+        if user.certificate_id:
+            arch = CertArchive.query.filter_by(certificate_id=user.certificate_id).first()
+            if arch:
+                arch.status = 'revoked'
+        db.session.add(AuditLog(
+            user_id=user.id, action='revoked', performed_by=current_user.email,
+            details={'certificate_id': user.certificate_id},
+        ))
+        revoked += 1
+    db.session.commit()
+    return jsonify({'message': f'{revoked} certificate(s) revoked'})
 
 
 @bp.route('/api/send', methods=['POST'])
@@ -426,40 +513,60 @@ def send_certificates():
     cert_type_id = data['cert_type_id']
     draft_id = data.get('draft_id')
     confirmed = data.get('confirmed', False)
-
     if not confirmed:
-        users = User.query.filter(
-            User.id.in_(user_ids), User.status == 'approved').all()
+        users = User.query.filter(User.id.in_(user_ids), User.status == 'approved').all()
         ct = CertificateType.query.get(cert_type_id)
         org = OrgSettings.query.first() or OrgSettings()
-        return jsonify({
-            'needs_confirmation': True,
-            'recipient_count': len(users),
-            'course': ct.name if ct else '',
-            'sender': f"{org.sender_name} <{org.sender_email or current_app.config.get('MAIL_USERNAME','')}>",
-            'cert_type_id': cert_type_id,
-        })
-
-    from app.services.email.queue import enqueue_batch
-
-    users = User.query.filter(
-        User.id.in_(user_ids), User.status == 'approved').all()
-    queued_ids = []
+        return jsonify({'needs_confirmation': True, 'recipient_count': len(users), 'course': ct.name if ct else '', 'sender': f"{org.sender_name} <{org.sender_email or current_app.config.get('MAIL_USERNAME', '')}>", 'cert_type_id': cert_type_id})
+    ct = CertificateType.query.get(cert_type_id)
+    if draft_id:
+        draft = db.session.get(EmailDraft, draft_id)
+        if not draft:
+            return (jsonify({'error': 'Selected email draft not found.'}), 400)
+    elif not ct.email_message:
+        default_draft = EmailDraft.query.filter_by(is_default=True).first()
+        if not default_draft:
+            return (jsonify({'error': 'No email template configured. Please provide a message in the Certificate Type settings or create a default Email Draft.'}), 400)
+    from app.models import Certificate, CertificateStatus
+    users = User.query.filter(User.id.in_(user_ids), User.status == 'approved').all()
+    queued = 0
     for user in users:
-        user.status = 'sending'
-        user.sent_at = datetime.utcnow()
-        queued_ids.append(user.id)
+        # Ensure Certificate record exists (IDEMPOTENT)
+        if not user.certificate_id:
+            assign_certificate_id(user)
+            db.session.commit()
 
-    db.session.add(AuditLog(
-        action='batch_send_initiated', performed_by=current_user.email,
-        details={'count': len(queued_ids), 'cert_type_id': cert_type_id}
-    ))
+        cert = Certificate.query.get(user.certificate_id)
+        if not cert:
+            cert = Certificate(
+                id=user.certificate_id,
+                user_id=user.id,
+                cert_type_id=cert_type_id,
+                status=CertificateStatus.DRAFT
+            )
+            db.session.add(cert)
+            cert._log_event("CERT_CREATED")
+            db.session.commit()
+
+        # Transition to APPROVED_FOR_GENERATION
+        if cert.status == CertificateStatus.DRAFT:
+            cert.transition_to_approved()
+            db.session.commit()
+
+        # Trigger generation flow
+        if cert.status == CertificateStatus.APPROVED_FOR_GENERATION:
+            current_app.task_queue.enqueue(
+                'generate_certificate', 
+                idempotency_key=f"cert_{user.id}_{cert_type_id}", 
+                certificate_id=cert.id,
+                draft_id=draft_id
+            )
+            queued += 1
+
+    db.session.add(AuditLog(action='batch_send_initiated', performed_by=current_user.email,
+                   details={'count': queued, 'cert_type_id': cert_type_id}))
     db.session.commit()
-
-    if queued_ids:
-        enqueue_batch(queued_ids, cert_type_id, draft_id)
-
-    return jsonify({'message': f'{len(queued_ids)} certificates queued for dispatch'})
+    return jsonify({'message': f'{queued} certificates queued for dispatch'})
 
 
 @bp.route('/api/send-all-approved', methods=['POST'])
@@ -469,147 +576,79 @@ def send_all_approved():
     cert_type_id = data['cert_type_id']
     draft_id = data.get('draft_id')
     confirmed = data.get('confirmed', False)
-
-    users = User.query.filter_by(
-        certificate_type_id=cert_type_id, status='approved').all()
-
+    users = User.query.filter_by(certificate_type_id=cert_type_id, status='approved').all()
     if not confirmed:
         ct = CertificateType.query.get(cert_type_id)
         org = OrgSettings.query.first() or OrgSettings()
-        return jsonify({
-            'needs_confirmation': True,
-            'recipient_count': len(users),
-            'course': ct.name if ct else '',
-            'sender': f"{org.sender_name} <{org.sender_email or current_app.config.get('MAIL_USERNAME','')}>",
-        })
-
+        return jsonify({'needs_confirmation': True, 'recipient_count': len(users), 'course': ct.name if ct else '', 'sender': f"{org.sender_name} <{org.sender_email or current_app.config.get('MAIL_USERNAME', '')}>"})
     if not users:
         return jsonify({'message': 'No approved participants found'})
-
-    from app.services.email.queue import enqueue_batch
-
-    queued_ids = []
+    ct = CertificateType.query.get(cert_type_id)
+    if draft_id:
+        draft = db.session.get(EmailDraft, draft_id)
+        if not draft:
+            return (jsonify({'error': 'Selected email draft not found.'}), 400)
+    elif not ct.email_message:
+        default_draft = EmailDraft.query.filter_by(is_default=True).first()
+        if not default_draft:
+            return (jsonify({'error': 'No email template configured. Please provide a message in the Certificate Type settings or create a default Email Draft.'}), 400)
+    from app.models import Certificate, CertificateStatus
+    queued = 0
     for user in users:
-        user.status = 'sending'
-        user.sent_at = datetime.utcnow()
-        queued_ids.append(user.id)
+        # Ensure Certificate record exists
+        if not user.certificate_id:
+            assign_certificate_id(user)
+            db.session.commit()
 
-    db.session.add(AuditLog(
-        action='send_all_approved', performed_by=current_user.email,
-        details={'count': len(queued_ids), 'cert_type_id': cert_type_id}
-    ))
+        cert = Certificate.query.get(user.certificate_id)
+        if not cert:
+            cert = Certificate(
+                id=user.certificate_id,
+                user_id=user.id,
+                cert_type_id=cert_type_id,
+                status=CertificateStatus.DRAFT
+            )
+            db.session.add(cert)
+            cert._log_event("CERT_CREATED")
+            db.session.commit()
+
+        if cert.status == CertificateStatus.DRAFT:
+            cert.transition_to_approved()
+            db.session.commit()
+
+        if cert.status == CertificateStatus.APPROVED_FOR_GENERATION:
+            current_app.task_queue.enqueue(
+                'generate_certificate', 
+                idempotency_key=f"cert_{user.id}_{cert_type_id}", 
+                certificate_id=cert.id,
+                draft_id=draft_id
+            )
+            queued += 1
+
+    db.session.add(AuditLog(action='send_all_approved', performed_by=current_user.email,
+                   details={'count': queued, 'cert_type_id': cert_type_id}))
     db.session.commit()
-
-    enqueue_batch(queued_ids, cert_type_id, draft_id)
-
-    return jsonify({'message': f'{len(queued_ids)} certificates queued for dispatch'})
+    return jsonify({'message': f'{queued} certificates queued for dispatch'})
 
 
 @bp.route('/api/nudge', methods=['POST'])
 @login_required
 def nudge_user():
-    from app.services.email.queue import run_in_background
-    from app.worker import send_nudge_email
-
     uid = request.json['user_id']
-    run_in_background(send_nudge_email, user_id=uid)
+    current_app.task_queue.enqueue('send_nudge_email', idempotency_key=f"nudge_{uid}_{datetime.utcnow().strftime('%Y%m%d')}", user_id=uid, job_timeout=30)
     return jsonify({'message': 'Reminder queued'})
-
-
-@bp.route('/api/users/<int:uid>/certificate.pdf')
-@login_required
-def download_user_certificate(uid):
-    """View/download a registrant's generated certificate. Generates on
-    demand if the registrant is approved but the archive copy is missing."""
-    from flask import send_file
-    from app.services.certgen import generate_for_user
-
-    user = db.session.get(User, uid)
-    if not user:
-        return jsonify({'error': 'Not found'}), 404
-
-    archive = CertArchive.query.filter_by(certificate_id=user.certificate_id).first()
-    pdf_bytes = archive.pdf_binary if archive and archive.pdf_binary else None
-
-    if not pdf_bytes:
-        if user.status not in ('approved', 'sending', 'sent'):
-            return jsonify({'error': 'Certificate not generated — registrant is not approved yet'}), 409
-        cert_type = db.session.get(CertificateType, user.certificate_type_id)
-        org = OrgSettings.query.first() or OrgSettings()
-        try:
-            pdf_bytes = generate_for_user(user, cert_type, org)
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': f'Generation failed: {e}'}), 500
-
-    return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype='application/pdf',
-        as_attachment=request.args.get('download') == '1',
-        download_name=f"Certificate_{user.certificate_id}.pdf",
-    )
-
-
-@bp.route('/api/users/<int:uid>/regenerate', methods=['POST'])
-@login_required
-def regenerate_user_certificate(uid):
-    """Re-render an approved registrant's certificate (e.g. after fixing a
-    name) and replace the archived copy."""
-    from app.services.certgen import generate_for_user
-
-    user = db.session.get(User, uid)
-    if not user:
-        return jsonify({'error': 'Not found'}), 404
-    if user.status not in ('approved', 'sending', 'sent'):
-        return jsonify({'error': 'Only approved registrants have certificates'}), 409
-
-    cert_type = db.session.get(CertificateType, user.certificate_type_id)
-    org = OrgSettings.query.first() or OrgSettings()
-    try:
-        generate_for_user(user, cert_type, org)
-        db.session.add(AuditLog(user_id=uid, action='regenerated',
-                                performed_by=current_user.email,
-                                details={'cert_id': user.certificate_id}))
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Generation failed: {e}'}), 500
-    return jsonify({'message': 'Certificate regenerated'})
-
-
-@bp.route('/api/revoke', methods=['POST'])
-@login_required
-def revoke_certificates():
-    """Revoke issued certificates — mirrors the MedLocum revocation flow.
-    Revoked certificates fail public verification."""
-    user_ids = request.json['user_ids']
-    users = User.query.filter(User.id.in_(user_ids)).all()
-    revoked = 0
-    for u in users:
-        if not u.certificate_id:
-            continue
-        u.revoked_at = datetime.utcnow()
-        u.status = 'revoked'
-        archive = CertArchive.query.filter_by(certificate_id=u.certificate_id).first()
-        if archive:
-            archive.status = 'revoked'
-        db.session.add(AuditLog(user_id=u.id, action='revoked',
-                                performed_by=current_user.email,
-                                details={'cert_id': u.certificate_id}))
-        revoked += 1
-    db.session.commit()
-    return jsonify({'message': f'{revoked} certificates revoked'})
 
 
 @bp.route('/api/delete', methods=['POST'])
 @login_required
 def delete_users():
+    from app.models import Certificate, JobQueue, CertificateLedgerEntry
     user_ids = request.json['user_ids']
     users = User.query.filter(User.id.in_(user_ids)).all()
+
     for u in users:
-        if u.certificate_id and not CertArchive.query.filter_by(
-                certificate_id=u.certificate_id).first():
+        # 1. Preserve certificate ID in CertArchive ledger before deletion
+        if u.certificate_id and not CertArchive.query.filter_by(certificate_id=u.certificate_id).first():
             db.session.add(CertArchive(
                 certificate_id=u.certificate_id,
                 full_name=u.full_name,
@@ -620,13 +659,36 @@ def delete_users():
                 status='archived',
                 raw_binary=json.dumps({'email': u.email}).encode('utf-8')
             ))
+
+        # 2. Remove archived PDF from disk
+        if u.certificate_id:
+            archive_path = f"archive/{u.certificate_id}.pdf"
+            if os.path.exists(archive_path):
+                try:
+                    os.remove(archive_path)
+                except OSError:
+                    pass
+
+        # 3. Delete CertificateLedgerEntry records (FK: certificate_ledger.cert_id → certificates.id)
+        if u.certificate_id:
+            CertificateLedgerEntry.query.filter_by(cert_id=u.certificate_id).delete(synchronize_session=False)
+
+        # 4. Delete Certificate record (FK: certificates.user_id → users.id)
+        if u.certificate_id:
+            cert = Certificate.query.get(u.certificate_id)
+            if cert:
+                db.session.delete(cert)
+
+        # 5. Nullify / delete orphaned AuditLog rows for this user
+        AuditLog.query.filter_by(user_id=u.id).update({'user_id': None}, synchronize_session=False)
+
+    db.session.flush()  # Flush FK-dependent deletes before bulk user delete
+
+    # 6. Now safe to delete the user rows
     User.query.filter(User.id.in_(user_ids)).delete(synchronize_session=False)
-    db.session.add(AuditLog(
-        action='deleted', performed_by=current_user.email,
-        details={'count': len(user_ids)}
-    ))
+    db.session.add(AuditLog(action='deleted', performed_by=current_user.email, details={'count': len(user_ids)}))
     db.session.commit()
-    return jsonify({'message': f'{len(user_ids)} participants deleted'})
+    return jsonify({'message': f'{len(user_ids)} participant(s) deleted'})
 
 
 @bp.route('/api/users/archive', methods=['POST'])
@@ -634,34 +696,24 @@ def delete_users():
 def archive_users():
     user_ids = request.json['user_ids']
     User.query.filter(User.id.in_(user_ids)).update(
-        {'archived_at': datetime.utcnow(), 'status': 'archived'},
-        synchronize_session=False)
+        {'archived_at': datetime.utcnow(), 'status': 'archived'}, synchronize_session=False)
     db.session.commit()
     return jsonify({'message': f'{len(user_ids)} participants archived'})
+
 
 @bp.route('/api/drafts', methods=['GET'])
 @login_required
 def list_drafts():
     drafts = EmailDraft.query.order_by(EmailDraft.updated_at.desc()).all()
-    return jsonify([{
-        'id': d.id, 'name': d.name, 'subject': d.subject,
-        'body': d.body, 'include_attachment': d.include_attachment,
-        'is_default': d.is_default,
-        'updated_at': d.updated_at.strftime('%d/%m/%Y') if d.updated_at else ''
-    } for d in drafts])
+    return jsonify([{'id': d.id, 'name': d.name, 'subject': d.subject, 'body': d.body, 'include_attachment': d.include_attachment, 'is_default': d.is_default, 'updated_at': d.updated_at.strftime('%d/%m/%Y') if d.updated_at else ''} for d in drafts])
 
 
 @bp.route('/api/drafts', methods=['POST'])
 @login_required
 def save_draft():
     data = request.json or {}
-    draft = EmailDraft(
-        name=data.get('name', 'Untitled Draft'),
-        subject=data.get('subject', 'Your {{course_name}} Certificate'),
-        body=data.get('body', ''),
-        include_attachment=data.get('include_attachment', True),
-        is_default=data.get('is_default', False),
-    )
+    draft = EmailDraft(name=data.get('name', 'Untitled Draft'), subject=data.get('subject', 'Your {{course_name}} Certificate'), body=data.get(
+        'body', ''), include_attachment=data.get('include_attachment', True), is_default=data.get('is_default', False))
     db.session.add(draft)
     db.session.commit()
     return jsonify({'id': draft.id, 'message': 'Draft saved'})
@@ -672,7 +724,7 @@ def save_draft():
 def update_draft(did):
     draft = db.session.get(EmailDraft, did)
     if not draft:
-        return jsonify({'error': 'Not found'}), 404
+        return (jsonify({'error': 'Not found'}), 404)
     data = request.json or {}
     for f in ('name', 'subject', 'body', 'include_attachment', 'is_default'):
         if f in data:
@@ -687,23 +739,17 @@ def update_draft(did):
 def delete_draft(did):
     draft = db.session.get(EmailDraft, did)
     if not draft:
-        return jsonify({'error': 'Not found'}), 404
+        return (jsonify({'error': 'Not found'}), 404)
     db.session.delete(draft)
     db.session.commit()
     return jsonify({'message': 'Draft deleted'})
+
 
 @bp.route('/api/campaigns', methods=['GET'])
 @login_required
 def list_campaigns():
     camps = Campaign.query.order_by(Campaign.created_at.desc()).all()
-    return jsonify([{
-        'id': c.id, 'name': c.name, 'status': c.status,
-        'recipient_count': c.recipient_count,
-        'sent_count': c.sent_count, 'failed_count': c.failed_count,
-        'include_attachment': c.include_attachment,
-        'created_at': c.created_at.strftime('%d/%m/%Y') if c.created_at else '',
-        'sent_at': c.sent_at.strftime('%d/%m/%Y %H:%M') if c.sent_at else '',
-    } for c in camps])
+    return jsonify([{'id': c.id, 'name': c.name, 'status': c.status, 'recipient_count': c.recipient_count, 'sent_count': c.sent_count, 'failed_count': c.failed_count, 'include_attachment': c.include_attachment, 'created_at': c.created_at.strftime('%d/%m/%Y') if c.created_at else '', 'sent_at': c.sent_at.strftime('%d/%m/%Y %H:%M') if c.sent_at else ''} for c in camps])
 
 
 @bp.route('/api/campaigns', methods=['POST'])
@@ -714,33 +760,17 @@ def create_campaign():
     draft_id = data.get('draft_id')
     cert_type_id = data.get('cert_type_id')
     send_now = data.get('send_now', False)
-
-    campaign = Campaign(
-        name=data.get('name', f"Campaign {datetime.utcnow().strftime('%d/%m/%Y')}"),
-        cert_type_id=cert_type_id,
-        draft_id=draft_id,
-        include_attachment=data.get('include_attachment', False),
-        recipient_count=len(user_ids),
-        status='draft',
-        created_by=current_user.email,
-    )
+    campaign = Campaign(name=data.get('name', f"Campaign {datetime.utcnow().strftime('%d/%m/%Y')}"), cert_type_id=cert_type_id, draft_id=draft_id,
+                        include_attachment=data.get('include_attachment', False), recipient_count=len(user_ids), status='draft', created_by=current_user.email)
     db.session.add(campaign)
     db.session.commit()
-
     if send_now:
-        from app.services.email.queue import run_in_background
-        from app.worker import process_campaign
-
-        run_in_background(
-            process_campaign,
-            campaign_id=campaign.id,
-            user_ids=user_ids,
-            draft_id=draft_id,
-        )
+        current_app.task_queue.enqueue('process_campaign', idempotency_key=f"campaign_{campaign.id}", campaign_id=campaign.id,
+                                       user_ids=user_ids, draft_id=draft_id, job_timeout=600)
         campaign.status = 'scheduled'
         db.session.commit()
-
     return jsonify({'id': campaign.id, 'message': 'Campaign created'})
+
 
 @bp.route('/api/lms/completion', methods=['POST'])
 def lms_completion():
@@ -750,47 +780,28 @@ def lms_completion():
     score = data.get('score') or data.get('grade')
     completion = data.get('completion_status') or data.get('status') or 'completed'
     token = data.get('registration_token') or request.args.get('token', '')
-
     if not email or not token:
-        return jsonify({'error': 'email and registration_token required'}), 400
-
+        return (jsonify({'error': 'email and registration_token required'}), 400)
     ct = CertificateType.query.filter_by(registration_token=token, is_active=True).first()
     if not ct:
-        return jsonify({'error': 'Invalid token'}), 404
-
+        return (jsonify({'error': 'Invalid token'}), 404)
     name_parts = full_name.split()
     if len(name_parts) == 1:
         first_name = name_parts[0]
-        surname = ""
+        surname = ''
     elif len(name_parts) > 1:
         first_name = name_parts[0]
-        surname = " ".join(name_parts[1:])
+        surname = ' '.join(name_parts[1:])
     else:
         first_name = email.split('@')[0]
-        surname = ""
-
-    seq = next_sequence(ct)
-    cert_id = generate_cert_id(ct.course_code, seq, datetime.utcnow())
-
-    user = User(
-        first_name=first_name,
-        surname=surname,
-        email=email,
-        certificate_type_id=ct.id,
-        certificate_id=cert_id,
-        status='registered',
-        score=float(score) if score else None,
-        completion_status=completion,
-        source='lms',
-    )
+        surname = ''
+    user = User(first_name=first_name, surname=surname, email=email, certificate_type_id=ct.id,
+                status='registered', score=float(score) if score else None, completion_status=completion, source='lms')
     db.session.add(user)
+    db.session.flush()
+    cert_id = assign_certificate_id(user)
     db.session.commit()
-
-    return jsonify({
-        'message': 'Participant registered',
-        'certificate_id': cert_id,
-        'status': 'pending_admin_approval'
-    })
+    return jsonify({'message': 'Participant registered', 'certificate_id': cert_id, 'status': 'pending_admin_approval'})
 
 
 @bp.route('/api/lms/users', methods=['POST'])
@@ -798,11 +809,9 @@ def lms_users():
     data = request.json or {}
     token = data.get('registration_token') or request.args.get('token', '')
     users_data = data.get('users', [])
-
     ct = CertificateType.query.filter_by(registration_token=token, is_active=True).first()
     if not ct:
-        return jsonify({'error': 'Invalid token'}), 404
-
+        return (jsonify({'error': 'Invalid token'}), 404)
     imported = 0
     for u in users_data:
         email = (u.get('email') or '').strip().lower()
@@ -812,68 +821,47 @@ def lms_users():
         name_parts = full.split()
         if len(name_parts) == 1:
             f_name = name_parts[0]
-            s_name = ""
+            s_name = ''
         elif len(name_parts) > 1:
             f_name = name_parts[0]
-            s_name = " ".join(name_parts[1:])
+            s_name = ' '.join(name_parts[1:])
         else:
             f_name = email.split('@')[0]
-            s_name = ""
-
-        seq = next_sequence(ct)
-        cert_id = generate_cert_id(ct.course_code, seq, datetime.utcnow())
-
-        user = User(
-            first_name=f_name,
-            surname=s_name,
-            email=email,
-            certificate_type_id=ct.id,
-            certificate_id=cert_id,
-            status='registered',
-            source='lms',
-        )
+            s_name = ''
+        user = User(first_name=f_name, surname=s_name, email=email,
+                    certificate_type_id=ct.id, status='registered', source='lms')
         db.session.add(user)
+        db.session.flush()
+        assign_certificate_id(user)
         imported += 1
-
     db.session.commit()
     return jsonify({'message': f'{imported} users synced'})
 
+
 @bp.route('/verify/<cert_id>')
 def verify_cert(cert_id):
-    """Public certificate verification (the QR code target). Mirrors the
-    MedLocum semantics: a certificate verifies only if it exists and has
-    not been revoked."""
-    revoked = False
-    record = CertArchive.query.filter_by(certificate_id=cert_id).first()
-    if record and record.status == 'revoked':
-        revoked = True
-    if not record:
-        user = User.query.filter_by(certificate_id=cert_id).first()
-        if user:
-            revoked = user.revoked_at is not None or user.status == 'revoked'
-            record = type('R', (), {
-                'certificate_id': user.certificate_id,
-                'full_name': user.full_name,
-                'cert_name': user.certificate_type.name if user.certificate_type else '',
-                'issued_date': (user.sent_at or user.approved_at).strftime('%d %B %Y')
-                               if (user.sent_at or user.approved_at) else '',
-                'status': user.status,
-            })()
-    if revoked:
-        record = None
     fmt_valid = verify_format(cert_id)
-    return render_template('public/verify.html',
-                           record=record, fmt_valid=fmt_valid,
-                           revoked=revoked, cert_id=cert_id)
+    user = User.query.filter_by(certificate_id=cert_id).first()
+    archive = CertArchive.query.filter_by(certificate_id=cert_id).first()
+
+    # Revoked certificates must fail public verification.
+    if (user and user.revoked_at) or (archive and archive.status == 'revoked'):
+        return render_template('public/verify.html', record=None, revoked=True,
+                               fmt_valid=fmt_valid, cert_id=cert_id)
+
+    record = archive
+    if not record and user:
+        record = type('R', (), {'certificate_id': user.certificate_id, 'full_name': user.full_name, 'cert_name': user.certificate_type.name if user.certificate_type else '',
+                      'issued_date': user.sent_at.strftime('%d %B %Y') if user.sent_at else '', 'status': user.status})()
+    return render_template('public/verify.html', record=record, fmt_valid=fmt_valid, cert_id=cert_id)
 
 
-# unsubscribe route lives in email_routes.py to avoid duplicate endpoint
 @bp.route('/api/archive/<cert_id>')
 @login_required
 def get_archive(cert_id):
     record = CertArchive.query.filter_by(certificate_id=cert_id).first()
     if not record:
-        return jsonify({'error': 'Not found'}), 404
+        return (jsonify({'error': 'Not found'}), 404)
     data = record.to_dict()
     if record.raw_binary:
         try:
@@ -882,13 +870,177 @@ def get_archive(cert_id):
             pass
     return jsonify(data)
 
+
 @bp.route('/api/audit')
 @login_required
 def get_audit():
     logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(200).all()
-    return jsonify([{
-        'action': l.action,
-        'performed_by': l.performed_by,
-        'details': l.details,
-        'created_at': l.created_at.strftime('%d/%m/%Y %H:%M:%S') if l.created_at else '',
-    } for l in logs])
+    return jsonify([{'action': l.action, 'performed_by': l.performed_by, 'details': l.details, 'created_at': l.created_at.strftime('%d/%m/%Y %H:%M:%S') if l.created_at else ''} for l in logs])
+
+
+@bp.route('/api/archive/view/<cert_id>')
+def view_certificate(cert_id):
+    """
+    Public/Admin certificate preview endpoint.
+    Shows the actual generated PDF in browser.
+    """
+    from flask import send_file, jsonify
+    from app.models import Certificate
+    user = User.query.filter_by(certificate_id=cert_id).first()
+    
+    if not user:
+        return jsonify({
+            'error': 'Certificate ID not found',
+            'certificate_id': cert_id,
+            'status': 'invalid'
+        }), 404
+    
+    archive_dir = os.path.abspath('archive')
+    archive_path = os.path.join(archive_dir, f"{cert_id}.pdf")
+    current_app.logger.warning(f"Looking for certificate at {archive_path}")
+    
+    # Ephemeral filesystem recovery: if PDF doesn't exist on disk, check DB for pdf_artifact
+    if not os.path.exists(archive_path):
+        cert = Certificate.query.get(cert_id)
+        if cert and cert.pdf_artifact:
+            current_app.logger.info(f"Serving {cert_id}.pdf directly from DB pdf_artifact via in-memory buffer")
+            import io
+            # Warm up cache in background/non-blocking fashion
+            try:
+                os.makedirs(archive_dir, exist_ok=True)
+                with open(archive_path, 'wb') as f:
+                    f.write(cert.pdf_artifact)
+            except Exception as e:
+                current_app.logger.warning(f"Optional local caching of PDF to disk failed: {e}")
+            
+            return send_file(
+                io.BytesIO(cert.pdf_artifact),
+                mimetype='application/pdf',
+                as_attachment=False,
+                download_name=f'{cert_id}.pdf'
+            )
+    
+    if not os.path.exists(archive_path):
+        return jsonify({
+            'error': 'Certificate PDF not generated yet',
+            'certificate_id': cert_id,
+            'recipient_name': f"{user.first_name} {user.surname}",
+            'status': user.status,
+            'generated': False,
+            'help': 'Certificate may still be processing or failed. Check worker logs.'
+        }), 404
+    
+    return send_file(
+        archive_path,
+        mimetype='application/pdf',
+        as_attachment=False,
+        download_name=f'{cert_id}.pdf'
+    )
+
+@bp.route('/api/archive/status/<certificate_id>')
+def archive_status(certificate_id):
+    """
+    Quick status check — does the PDF exist in archive?
+    """
+    from flask import jsonify
+    from app.models import Certificate
+    user = User.query.filter_by(certificate_id=certificate_id).first()
+    
+    if not user:
+        return jsonify({'error': 'Invalid certificate ID'}), 404
+    
+    archive_dir = os.path.abspath('archive')
+    archive_path = os.path.join(archive_dir, f"{certificate_id}.pdf")
+    
+    # Ephemeral filesystem recovery: if PDF doesn't exist on disk, check DB for pdf_artifact
+    if not os.path.exists(archive_path):
+        cert = Certificate.query.get(certificate_id)
+        if cert and cert.pdf_artifact:
+            try:
+                os.makedirs(archive_dir, exist_ok=True)
+                with open(archive_path, 'wb') as f:
+                    f.write(cert.pdf_artifact)
+                current_app.logger.info(f"Self-healed (status): restored {certificate_id}.pdf from DB to filesystem")
+            except Exception as e:
+                current_app.logger.error(f"Failed to write self-healed PDF to disk: {e}")
+
+    pdf_exists = os.path.exists(archive_path)
+    
+    return jsonify({
+        'certificate_id': certificate_id,
+        'recipient': f"{user.first_name} {user.surname}",
+        'email': user.email,
+        'status': user.status,
+        'pdf_generated': pdf_exists,
+        'pdf_size_bytes': os.path.getsize(archive_path) if pdf_exists else 0,
+        'verification_url': f"/api/archive/view/{certificate_id}"
+    })
+
+
+@bp.route('/api/archive/purge', methods=['POST'])
+@login_required
+def purge_archive():
+    """Delete certificate PDFs from archive. Frees storage while keeping DB records."""
+    data = request.json or {}
+    cert_type_id = data.get('cert_type_id')
+    purge_all = data.get('purge_all', False)
+
+    if purge_all:
+        cert_types = CertificateType.query.all()
+    elif cert_type_id:
+        ct = CertificateType.query.get(cert_type_id)
+        if not ct:
+            return jsonify({'error': 'Certificate type not found'}), 404
+        cert_types = [ct]
+    else:
+        return jsonify({'error': 'Specify cert_type_id or purge_all=true'}), 400
+
+    purged_count = 0
+    freed_bytes = 0
+
+    for ct in cert_types:
+        users = User.query.filter_by(certificate_type_id=ct.id).all()
+        for user in users:
+            if user.certificate_id:
+                archive_path = f"archive/{user.certificate_id}.pdf"
+                if os.path.exists(archive_path):
+                    freed_bytes += os.path.getsize(archive_path)
+                    os.remove(archive_path)
+                    purged_count += 1
+
+    db.session.add(AuditLog(
+        action='archive_purged',
+        performed_by=current_user.email,
+        details={'purged': purged_count, 'freed_bytes': freed_bytes}
+    ))
+    db.session.commit()
+
+    return jsonify({
+        'message': f'Purged {purged_count} certificate PDFs',
+        'freed_mb': round(freed_bytes / (1024 * 1024), 2),
+        'freed_bytes': freed_bytes
+    })
+
+
+@bp.route('/api/archive/stats')
+@login_required
+def archive_stats():
+    """Return archive storage usage stats."""
+    archive_dir = 'archive'
+    if not os.path.exists(archive_dir):
+        return jsonify({'total_files': 0, 'total_size_mb': 0, 'total_size_bytes': 0})
+
+    total_size = 0
+    file_count = 0
+    for filename in os.listdir(archive_dir):
+        if filename.endswith('.pdf'):
+            fp = os.path.join(archive_dir, filename)
+            total_size += os.path.getsize(fp)
+            file_count += 1
+
+    return jsonify({
+        'total_files': file_count,
+        'total_size_mb': round(total_size / (1024 * 1024), 2),
+        'total_size_bytes': total_size
+    })
+

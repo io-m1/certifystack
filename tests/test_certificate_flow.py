@@ -1,13 +1,17 @@
-"""End-to-end coverage of the ported MedLocum certificate architecture:
+"""End-to-end coverage of the merged certificate architecture:
 
-registration gateway -> admin approval (generates + archives the PDF)
--> admin-triggered dispatch (emails the archived PDF) -> public verification.
+registration gateway -> admin approval (generates + archives the PDF via the
+shared render seam) -> admin-triggered dispatch -> public verification.
+
+Template-less gateways render the MedLocum designed certificate; uploaded
+templates go through the SVG personalization pipeline (with the legacy
+overlay engine as fallback).
 """
 
 from datetime import datetime
 
 from app import db
-from app.models import User, CertificateType, CertArchive, OrgSettings, EmailLog
+from app.models import CertArchive, Certificate, CertificateType, OrgSettings, User
 
 
 def _make_gateway(**overrides):
@@ -47,23 +51,6 @@ def test_mlj_renderer_produces_valid_pdf(app):
     )
     assert pdf.startswith(b'%PDF')
     assert len(pdf) > 3000
-
-
-def test_renderer_facade_uses_mlj_mode_without_template(app):
-    from app.engine.renderer import render_certificate_pdf
-
-    ct = _make_gateway()
-    user = User(
-        first_name='Grace', surname='Hopper', email='grace@test.local',
-        certificate_type_id=ct.id, certificate_id='MLJ-BLS-2026-000009',
-        status='approved', approved_at=datetime.utcnow(),
-    )
-    db.session.add(user)
-    db.session.commit()
-
-    org = OrgSettings(verify_base_url='https://certs.test')
-    pdf = render_certificate_pdf(user, ct, org)
-    assert pdf.startswith(b'%PDF')
 
 
 def test_certificate_never_prints_verification_url(app):
@@ -123,6 +110,23 @@ def test_overlay_engine_masks_baked_in_names(app, tmp_path):
     assert 'http' not in text.lower()
 
 
+def test_render_seam_uses_mlj_mode_without_template(app):
+    from app.domain.certificates.service import render_certificate_bytes
+
+    ct = _make_gateway()
+    user = User(
+        first_name='Grace', surname='Hopper', email='grace@test.local',
+        certificate_type_id=ct.id, certificate_id='MLJ-BLS-2026-000009',
+        status='approved', approved_at=datetime.utcnow(),
+    )
+    db.session.add(user)
+    db.session.commit()
+
+    org = OrgSettings(verify_base_url='https://certs.test')
+    pdf = render_certificate_bytes(user, ct, org)
+    assert pdf.startswith(b'%PDF')
+
+
 # ── Gateway creation ──────────────────────────────────────────────
 
 
@@ -157,31 +161,29 @@ def test_registration_stays_pending_until_admin_approves(client):
     assert user.status == 'registered'
     assert user.certificate_id == data['certificate_id']
     assert user.generated_at is None
-    assert CertArchive.query.filter_by(certificate_id=user.certificate_id).first() is None
+    assert Certificate.query.get(user.certificate_id) is None
 
 
-def test_approval_generates_and_archives_certificate(admin_client, monkeypatch):
+def test_approval_generates_and_archives_certificate(admin_client):
     ct = _make_gateway()
     _register(admin_client, ct.registration_token, email='approve@test.local')
     user = User.query.filter_by(email='approve@test.local').first()
 
-    # Run the background generation synchronously for determinism.
-    import app.services.email.queue as q
-    monkeypatch.setattr(q, 'run_in_background', lambda func, **kw: func(**kw))
-
-    res = admin_client.post('/api/approve', json={'user_ids': [user.id]})
+    res = admin_client.post('/api/approve', json={
+        'user_ids': [user.id], 'cert_type_id': ct.id,
+    })
     assert res.status_code == 200
-    assert res.get_json()['approved'] == 1
+    assert res.get_json()['generated'] == 1
 
     db.session.expire_all()
     user = db.session.get(User, user.id)
     assert user.status == 'approved'
     assert user.generated_at is not None
 
-    archive = CertArchive.query.filter_by(certificate_id=user.certificate_id).first()
-    assert archive is not None
-    assert archive.status == 'generated'
-    assert archive.pdf_binary.startswith(b'%PDF')
+    cert = Certificate.query.get(user.certificate_id)
+    assert cert is not None
+    assert cert.status == 'READY_FOR_DISPATCH'
+    assert cert.pdf_artifact.startswith(b'%PDF')
 
 
 def test_rejected_registrant_gets_no_certificate(admin_client):
@@ -198,26 +200,29 @@ def test_rejected_registrant_gets_no_certificate(admin_client):
     assert user.generated_at is None
 
 
-def test_admin_can_download_generated_certificate(admin_client):
+def test_admin_can_view_generated_certificate(admin_client):
     ct = _make_gateway()
     _register(admin_client, ct.registration_token, email='dl@test.local')
     user = User.query.filter_by(email='dl@test.local').first()
-    user.status = 'approved'
-    user.approved_at = datetime.utcnow()
-    db.session.commit()
 
-    res = admin_client.get(f'/api/users/{user.id}/certificate.pdf')
+    admin_client.post('/api/approve', json={
+        'user_ids': [user.id], 'cert_type_id': ct.id,
+    })
+    db.session.expire_all()
+    user = db.session.get(User, user.id)
+
+    res = admin_client.get(f'/api/archive/view/{user.certificate_id}')
     assert res.status_code == 200
     assert res.data.startswith(b'%PDF')
 
 
-def test_certificate_download_blocked_before_approval(admin_client):
+def test_certificate_view_unavailable_before_approval(admin_client):
     ct = _make_gateway()
     _register(admin_client, ct.registration_token, email='blocked@test.local')
     user = User.query.filter_by(email='blocked@test.local').first()
 
-    res = admin_client.get(f'/api/users/{user.id}/certificate.pdf')
-    assert res.status_code == 409
+    res = admin_client.get(f'/api/archive/view/{user.certificate_id}')
+    assert res.status_code == 404
 
 
 # ── Dispatch (admin-triggered, never automatic) ───────────────────
@@ -227,42 +232,37 @@ def test_dispatch_sends_archived_pdf_and_marks_sent(app, admin_client, monkeypat
     ct = _make_gateway()
     _register(admin_client, ct.registration_token, email='send@test.local')
     user = User.query.filter_by(email='send@test.local').first()
-    user.status = 'approved'
-    user.approved_at = datetime.utcnow()
 
-    from app.services.certgen import generate_for_user
-    org = OrgSettings.query.first() or OrgSettings()
-    generate_for_user(user, ct, org)
+    admin_client.post('/api/approve', json={
+        'user_ids': [user.id], 'cert_type_id': ct.id,
+    })
+    db.session.expire_all()
+    user = db.session.get(User, user.id)
+    cert = Certificate.query.get(user.certificate_id)
+    cert.transition_to_queued()
     db.session.commit()
 
     sent_mails = []
 
-    def fake_dispatch(to_email, subject, body, **kwargs):
-        sent_mails.append({'to': to_email, 'subject': subject,
-                           'attachments': kwargs.get('attachments')})
-        return {'success': True, 'error': None, 'attempts': 1}
+    def fake_send(to_email, first_name, full_name, course_name, pdf_bytes,
+                  certificate_id, issue_date, **kwargs):
+        sent_mails.append({'to': to_email, 'pdf': pdf_bytes,
+                           'cert_id': certificate_id})
+        return 'msg-test-001'
 
-    import app.services.email.sender as sender
-    monkeypatch.setattr(sender, 'dispatch', fake_dispatch)
+    import app.engine.email_sender as sender
+    monkeypatch.setattr(sender, 'send_certificate_email', fake_send)
 
-    log = EmailLog(recipient_email=user.email, recipient_name=user.full_name,
-                   email_type='certificate', status='pending',
-                   user_id=user.id, cert_type_id=ct.id)
-    db.session.add(log)
-    user.status = 'sending'
-    user.sent_at = datetime.utcnow()
-    db.session.commit()
-
-    from app.services.email.jobs import send_certificate_job
-    send_certificate_job(log_id=log.id, user_id=user.id, cert_type_id=ct.id)
+    from app.worker import dispatch_certificate
+    dispatch_certificate(job_id=0, certificate_id=user.certificate_id)
 
     assert len(sent_mails) == 1
     assert sent_mails[0]['to'] == 'send@test.local'
-    assert sent_mails[0]['attachments'][0]['data'].startswith(b'%PDF')
+    assert sent_mails[0]['pdf'].startswith(b'%PDF')
 
     db.session.expire_all()
     assert db.session.get(User, user.id).status == 'sent'
-    assert db.session.get(EmailLog, log.id).status == 'sent'
+    assert Certificate.query.get(user.certificate_id).status == 'SENT'
 
 
 # ── Public verification ───────────────────────────────────────────
@@ -272,11 +272,12 @@ def test_verify_page_confirms_generated_certificate(admin_client, client):
     ct = _make_gateway()
     _register(admin_client, ct.registration_token, email='verify@test.local')
     user = User.query.filter_by(email='verify@test.local').first()
-    user.status = 'approved'
-    user.approved_at = datetime.utcnow()
-    from app.services.certgen import generate_for_user
-    generate_for_user(user, ct, OrgSettings())
-    db.session.commit()
+
+    admin_client.post('/api/approve', json={
+        'user_ids': [user.id], 'cert_type_id': ct.id,
+    })
+    db.session.expire_all()
+    user = db.session.get(User, user.id)
 
     res = client.get(f'/verify/{user.certificate_id}')
     assert res.status_code == 200
@@ -287,20 +288,19 @@ def test_revoked_certificate_fails_verification(admin_client, client):
     ct = _make_gateway()
     _register(admin_client, ct.registration_token, email='revoke@test.local')
     user = User.query.filter_by(email='revoke@test.local').first()
-    user.status = 'approved'
-    user.approved_at = datetime.utcnow()
-    from app.services.certgen import generate_for_user
-    generate_for_user(user, ct, OrgSettings())
-    db.session.commit()
+
+    admin_client.post('/api/approve', json={
+        'user_ids': [user.id], 'cert_type_id': ct.id,
+    })
+    db.session.expire_all()
+    user = db.session.get(User, user.id)
 
     res = admin_client.post('/api/revoke', json={'user_ids': [user.id]})
     assert res.status_code == 200
 
     db.session.expire_all()
-    archive = CertArchive.query.filter_by(certificate_id=user.certificate_id).first()
-    assert archive.status == 'revoked'
+    assert db.session.get(User, user.id).status == 'revoked'
 
     page = client.get(f'/verify/{user.certificate_id}')
     assert page.status_code == 200
-    body = page.data.lower()
-    assert b'not' in body or b'invalid' in body
+    assert b'revoked' in page.data.lower()

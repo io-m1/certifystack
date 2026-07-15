@@ -30,7 +30,9 @@ def render_certificate_pdf(user, cert_type, org, issued_at=None) -> bytes:
         'overlay' if cert_type.master_pdf_path else 'mlj'
     )
 
-    if mode == 'overlay' and cert_type.master_pdf_path:
+    # Any template-backed mode ('overlay' or 'svg' falling back here when the
+    # SVG pipeline is unavailable) personalizes the uploaded master file.
+    if mode != 'mlj' and cert_type.master_pdf_path:
         from app.engine.pdf_processor import generate_personalized_pdf
 
         return generate_personalized_pdf(

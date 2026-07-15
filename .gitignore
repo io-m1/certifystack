@@ -6,3 +6,6 @@ uploads/*
 !uploads/.gitkeep
 instance/
 *.pid
+
+archive/*
+!archive/.gitkeep

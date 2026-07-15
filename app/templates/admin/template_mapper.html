@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Template Mapper — CertifyStack</title>
+
+<!-- Vendor CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@simonwep/pickr@1.8.4/dist/themes/classic.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wysiwyg.css') }}">
+
+<style>
+/* ---------- Core tokens (match dashboard) --------------------------------- */
+:root{
+  --g:#2362EB;--gd:#1a54cc;--gl:#eef4fe;--g2:#3b82f6;
+  --red:#dc2626;--amber:#d97706;--blue:#1d6fa4;--purple:#7c3aed;
+  --bg:#f0f2f5;--card:#fff;--border:#e5e7eb;--text:#111827;--muted:#6b7280;
+  --r:10px;--sh:0 1px 3px rgba(0,0,0,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+     background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
+
+/* ---------- Top bar ------------------------------------------------------- */
+.topbar{background:var(--g);color:#fff;padding:0 20px;height:52px;display:flex;
+        align-items:center;justify-content:space-between;position:sticky;top:0;
+        z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.topbar-logo{font-size:17px;font-weight:800;letter-spacing:-.3px;
+             display:flex;align-items:center;gap:8px;text-decoration:none;color:#fff}
+.topbar-right{display:flex;align-items:center;gap:14px}
+.topbar-right a{color:rgba(255,255,255,.8);text-decoration:none;font-size:12px}
+.topbar-right a:hover{color:#fff}
+
+/* ---------- Page wrapper -------------------------------------------------- */
+.page{padding:20px 24px;max-width:1400px;margin:0 auto}
+.page-header{display:flex;align-items:center;justify-content:space-between;
+             margin-bottom:20px;gap:16px;flex-wrap:wrap}
+.page-title{font-size:18px;font-weight:700;color:var(--text)}
+.page-subtitle{font-size:12px;color:var(--muted);margin-top:2px}
+.breadcrumb{font-size:12px;color:var(--muted)}
+.breadcrumb a{color:var(--blue);text-decoration:none}
+.breadcrumb a:hover{text-decoration:underline}
+
+/* ---------- Template info bar --------------------------------------------- */
+.template-info{background:var(--card);border:1px solid var(--border);border-radius:8px;
+               padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;
+               gap:16px;flex-wrap:wrap}
+.template-info .badge{display:inline-block;padding:3px 8px;border-radius:12px;
+                      font-size:11px;font-weight:600}
+.badge-svg  {background:#eef4fe;color:#2362EB}
+.badge-pdf  {background:#fff3e0;color:#e65100}
+.badge-raster{background:#f3e5f5;color:#7c3aed}
+.badge-pending   {background:#fff8e1;color:#e65100}
+.badge-confirmed {background:#eef4fe;color:#2362EB}
+.badge-in_review {background:#e3f2fd;color:#1565c0}
+
+/* ---------- Intelligence alerts ------------------------------------------- */
+.alerts-bar{margin-bottom:16px;display:flex;flex-direction:column;gap:8px}
+
+/* ---------- Action header buttons ----------------------------------------- */
+.action-strip{display:flex;gap:8px;flex-wrap:wrap}
+.btn{padding:8px 14px;border:none;border-radius:5px;font-size:12px;font-weight:600;
+     cursor:pointer;transition:background .15s,transform .1s;letter-spacing:.2px}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--g);color:#fff}
+.btn-primary:hover{background:var(--gd)}
+.btn-secondary{background:#fff;color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--bg)}
+.btn-blue{background:#2196F3;color:#fff}
+.btn-blue:hover{background:#1976D2}
+.btn-amber{background:#FF9800;color:#fff}
+.btn-amber:hover{background:#F57C00}
+</style>
+</head>
+
+<body>
+
+<!-- Top bar ---------------------------------------------------------------- -->
+<div class="topbar">
+  <a href="/admin" class="topbar-logo">CertifyStack</a>
+  <div class="topbar-right">
+    <a href="/admin">Back to Dashboard</a>
+    <a href="/logout">Sign out</a>
+  </div>
+</div>
+
+<!-- Page body -------------------------------------------------------------- -->
+<div class="page">
+
+  <!-- Header -->
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a href="/admin">Dashboard</a> &rsaquo; Template Mapper
+      </div>
+      <div class="page-title">{{ cert_type.name }}</div>
+      <div class="page-subtitle">
+        Visual field mapper — assign field types, adjust positions, and confirm the mapping.
+      </div>
+    </div>
+    <div class="action-strip">
+      <button class="btn btn-secondary" onclick="_mapper && _mapper._loadAnalysis()">
+        Re-analyse
+      </button>
+      <button class="btn btn-amber" onclick="matchFonts()">
+        Match Fonts
+      </button>
+      <button class="btn btn-secondary" onclick="suggestQR()">
+        Suggest QR Placement
+      </button>
+      <button class="btn btn-blue" onclick="_mapper && _mapper.testWithSampleData()">
+        Test Preview
+      </button>
+      <button class="btn btn-primary" onclick="_mapper && _mapper.saveMapping()">
+        Save Mapping
+      </button>
+    </div>
+  </div>
+
+  <!-- Template meta info -->
+  <div class="template-info">
+    <strong>{{ cert_type.name }}</strong>
+    {% if cert_type.template_format %}
+      <span class="badge badge-{{ cert_type.template_format }}">{{ cert_type.template_format | upper }}</span>
+    {% endif %}
+    {% if cert_type.mapping_status %}
+      <span class="badge badge-{{ cert_type.mapping_status }}">{{ cert_type.mapping_status | replace('_', ' ') | title }}</span>
+    {% endif %}
+    {% if cert_type.quality_level %}
+      <span style="font-size:12px;color:var(--muted)">Quality: <strong>{{ cert_type.quality_level }}</strong></span>
+    {% endif %}
+    {% if cert_type.detected_fields %}
+      <span style="font-size:12px;color:var(--muted)">{{ cert_type.detected_fields | length }} detected field(s)</span>
+    {% endif %}
+  </div>
+
+  <!-- Alerts (populated by JS) -->
+  <div class="alerts-bar" id="alertsBar"></div>
+
+  <!-- WYSIWYG Mapper -------------------------------------------------------- -->
+  <div class="template-mapper" id="mapperApp">
+
+    <!-- Left: SVG Preview -->
+    <div class="mapper-preview" id="svgPreview">
+      <div style="display:flex;align-items:center;justify-content:center;
+                  height:300px;color:var(--muted);font-size:13px;">
+        Loading template…
+      </div>
+    </div>
+
+    <!-- Right: Properties Panel -->
+    <div class="mapper-properties" id="propertyPanel">
+      <h3>Template Fields</h3>
+
+      <!-- Field list -->
+      <div id="fieldSelector" style="margin-bottom:12px;"></div>
+
+      <!-- Field detail editor (hidden until a field is selected) -->
+      <div id="fieldDetails" style="display:none;">
+        <h4>Selected Field</h4>
+
+        <div class="property-group">
+          <label>Field Type</label>
+          <select id="fieldType">
+            <option value="recipient_name">Recipient Name</option>
+            <option value="certificate_id">Certificate ID</option>
+            <option value="issuance_date">Issuance Date</option>
+            <option value="course_title">Course Title</option>
+            <option value="qr_code_zone">QR Code Zone</option>
+            <option value="custom_text">Custom Text</option>
+            <option value="unknown">Unknown / Ignore</option>
+          </select>
+        </div>
+
+        <div class="property-group">
+          <label>Font Family</label>
+          <select id="fontFamily"></select>
+        </div>
+
+        <div class="property-group">
+          <label>Font Size (px)</label>
+          <input type="number" id="fontSize" min="6" max="300" step="0.5">
+        </div>
+
+        <div class="property-group">
+          <label>Text Colour</label>
+          <input type="color" id="textColor">
+        </div>
+
+        <div style="display:flex;gap:8px">
+          <div class="property-group" style="flex:1">
+            <label>X Position</label>
+            <input type="number" id="posX" step="1">
+          </div>
+          <div class="property-group" style="flex:1">
+            <label>Y Position</label>
+            <input type="number" id="posY" step="1">
+          </div>
+        </div>
+
+        <div class="property-group">
+          <label>Confidence</label>
+          <span id="confidenceIndicator" class="confidence-badge"></span>
+        </div>
+
+        <div class="property-group">
+          <label>Evidence</label>
+          <div id="fieldEvidence" style="font-size:11px;color:var(--muted);
+               line-height:1.5;font-style:italic;"></div>
+        </div>
+      </div><!-- /fieldDetails -->
+
+      <!-- Font match results (hidden until matched) -->
+      <div id="fontMatchResults" style="display:none;margin-top:12px;">
+        <h4>Font Matches</h4>
+        <div id="fontMatchList"></div>
+      </div>
+
+      <!-- QR placement result (hidden until suggested) -->
+      <div id="qrPlacementResult" style="display:none;margin-top:12px;">
+        <h4>QR Placement</h4>
+        <div id="qrPlacementInfo"></div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="mapper-actions">
+        <button class="btn-test" onclick="testPreview()">Test Preview</button>
+        <button class="btn-save" onclick="saveMapping()">Save</button>
+      </div>
+    </div><!-- /mapper-properties -->
+
+  </div><!-- /template-mapper -->
+
+</div><!-- /page -->
+
+
+<!-- ── Scripts ─────────────────────────────────────────────────────────────── -->
+<script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@simonwep/pickr@1.8.4/dist/pickr.min.js"></script>
+<script src="{{ url_for('static', filename='js/wysiwyg_mapper.js') }}"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  const CERT_TYPE_ID = {{ cert_type.id }};
+  const API_BASE     = '/api/cert-types/' + CERT_TYPE_ID;
+  {% if cert_type.template_svg_path %}
+  const SVG_URL      = '/static/{{ cert_type.template_svg_path }}';
+  {% elif cert_type.master_svg_path %}
+  const SVG_URL      = '/static/{{ cert_type.master_svg_path }}';
+  {% else %}
+  const SVG_URL      = null;
+  {% endif %}
+
+  // Boot mapper
+  window._mapper = new TemplateMapper('mapperApp', {
+    certTypeId: CERT_TYPE_ID,
+    apiBase:    API_BASE,
+  });
+
+  if (SVG_URL) {
+    window._mapper.loadTemplate(SVG_URL);
+  } else {
+    document.getElementById('svgPreview').innerHTML =
+      '<div style="padding:40px;text-align:center;color:#9E9E9E;">' +
+      'No SVG template path available.<br>' +
+      '<small>Upload a template from the dashboard first.</small></div>';
+  }
+
+  // ── Alerts helper ────────────────────────────────────────────────────────
+
+  window._showAlerts = function (warnings, type) {
+    const bar = document.getElementById('alertsBar');
+    warnings.forEach(w => {
+      const div = document.createElement('div');
+      div.className = `intelligence-alert ${type || 'warning'}`;
+      div.innerHTML = `<span>${w}</span>`;
+      bar.appendChild(div);
+    });
+  };
+
+  // ── Font matching ─────────────────────────────────────────────────────────
+
+  window.matchFonts = function () {
+    fetch(`${API_BASE}/match-fonts`, { method: 'POST' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+      .then(data => {
+        const section = document.getElementById('fontMatchResults');
+        const list    = document.getElementById('fontMatchList');
+        section.style.display = 'block';
+        list.innerHTML = '';
+
+        (data.font_matches || []).forEach(m => {
+          const confCls = m.confidence >= 0.7 ? 'confidence-high'
+                        : m.confidence >= 0.4 ? 'confidence-medium'
+                        : 'confidence-low';
+          const row = document.createElement('div');
+          row.style.cssText = 'font-size:12px;margin-bottom:8px;padding:8px;' +
+                              'background:#f9fafb;border-radius:4px;';
+          row.innerHTML = `
+            <div><strong>${m.requested_font}</strong>
+              ${m.is_exact
+                ? '<span style="color:#059669;font-size:10px">exact</span>'
+                : `<span class="confidence-badge ${confCls}">${Math.round(m.confidence * 100)}%</span>`
+              }
+            </div>
+            ${!m.is_exact
+              ? `<div style="color:var(--muted)">${m.matched_font}</div>
+                 ${m.action_required
+                   ? '<div style="color:#e65100;font-size:11px">Admin selection required</div>'
+                   : ''}`
+              : ''}
+          `;
+          list.appendChild(row);
+        });
+
+        if (data.warnings && data.warnings.length) {
+          _showAlerts(data.warnings, 'warning');
+        }
+      })
+      .catch(err => console.error('matchFonts error:', err));
+  };
+
+  // ── QR placement ──────────────────────────────────────────────────────────
+
+  window.suggestQR = function () {
+    fetch(`${API_BASE}/qr-placement`, { method: 'POST' })
+      .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
+      .then(data => {
+        const section = document.getElementById('qrPlacementResult');
+        const info    = document.getElementById('qrPlacementInfo');
+        section.style.display = 'block';
+
+        if (!data.placement) {
+          info.innerHTML = '<div style="color:#f44336;font-size:12px">No suitable placement found.</div>';
+          return;
+        }
+        const p = data.placement;
+        const confCls = p.confidence >= 0.7 ? 'confidence-high'
+                      : p.confidence >= 0.4 ? 'confidence-medium'
+                      : 'confidence-low';
+        info.innerHTML = `
+          <div style="font-size:12px;padding:8px;background:#f9fafb;border-radius:4px;">
+            <div><strong>${p.location_desc}</strong>
+              <span class="confidence-badge ${confCls}">${Math.round(p.confidence * 100)}%</span>
+            </div>
+            <div style="color:var(--muted)">x=${p.x}, y=${p.y}, size=${p.size}px</div>
+          </div>`;
+      })
+      .catch(err => console.error('suggestQR error:', err));
+  };
+
+})();
+</script>
+
+</body>
+</html>

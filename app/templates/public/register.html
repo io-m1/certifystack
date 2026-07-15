@@ -24,6 +24,7 @@ button:hover{background:var(--brand-hover)}
 button:disabled{opacity:.5;cursor:not-allowed}
 .note{font-size:12px;color:var(--muted);margin-top:16px;line-height:1.6;text-align:center}
 .success{display:none;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:14px 16px;margin-top:18px;font-size:13px;line-height:1.6}
+.error{display:none;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:14px 16px;margin-top:18px;font-size:13px;line-height:1.6}
 footer{text-align:center;padding:20px;font-size:11px;color:#94a3b8}
 </style>
 </head>
@@ -56,32 +57,48 @@ footer{text-align:center;padding:20px;font-size:11px;color:#94a3b8}
                 verification — your certificate will be emailed to you once your
                 registration is approved and processed.
             </div>
+            <div class="error" id="errorMsg"></div>
             <div class="note">Your information is used solely for certificate issuance.</div>
         </div>
     </div>
     <footer>Medical Locum Jobs — Certificate Issuance</footer>
 
     <script>
-        document.getElementById('regForm').addEventListener('submit', async (e) => {
+        const form = document.getElementById('regForm');
+        const btn = document.getElementById('regBtn');
+        const successMsg = document.getElementById('successMsg');
+        const errorMsg = document.getElementById('errorMsg');
+
+        form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const btn = document.getElementById('regBtn');
             btn.disabled = true;
             btn.textContent = 'Submitting…';
+            successMsg.style.display = 'none';
+            errorMsg.style.display = 'none';
             try {
                 const formData = new FormData(e.target);
-                const response = await fetch(window.location.href, {
+                const response = await fetch(window.location.pathname, {
                     method: 'POST',
                     body: formData
                 });
                 if (response.ok) {
-                    document.getElementById('successMsg').style.display = 'block';
+                    successMsg.style.display = 'block';
                     e.target.reset();
                     btn.textContent = 'Registration submitted';
                 } else {
+                    let message = 'Registration could not be submitted. Please try again.';
+                    try {
+                        const data = await response.json();
+                        if (data && data.error) message = data.error;
+                    } catch (parseErr) { /* non-JSON error body */ }
+                    errorMsg.textContent = message;
+                    errorMsg.style.display = 'block';
                     btn.disabled = false;
                     btn.textContent = 'Submit registration';
                 }
             } catch (err) {
+                errorMsg.textContent = 'Network error — please check your connection and try again.';
+                errorMsg.style.display = 'block';
                 btn.disabled = false;
                 btn.textContent = 'Submit registration';
             }
